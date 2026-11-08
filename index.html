@@ -2,98 +2,151 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>PitchCut</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; background: #0f1720; color: #e8eef5; }
-  header { padding: 14px 18px; background: #16212e; font-size: 22px; font-weight: 700; }
-  header span { color: #4cc2ff; }
-  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
-  .card { background: #16212e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  button { background: #4cc2ff; color: #06202e; border: 0; border-radius: 8px; padding: 12px 16px;
-           font-size: 16px; font-weight: 600; margin: 4px; cursor: pointer; }
-  button.alt { background: #2a3b4e; color: #e8eef5; }
-  button.active { outline: 3px solid #fff; }
-  video { width: 100%; border-radius: 8px; background: #000; }
-  canvas { max-width: 100%; border-radius: 8px; touch-action: none; }
-  .hidden { display: none; }
-  label { display: block; margin-top: 10px; }
-  input[type=range] { width: 100%; }
-  progress { width: 100%; height: 18px; }
-  .small { font-size: 14px; color: #9fb3c8; }
+  :root { --bg:#0b1220; --panel:#121c2f; --panel2:#1a2742; --text:#eaf1fb; --muted:#8fa3bf; --accent:#ffb020; --accent2:#3ba3ff; --red:#e5484d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,sans-serif; background:radial-gradient(1200px 600px at 50% -200px,#16284a,var(--bg)); color:var(--text); min-height:100vh; }
+  header { display:flex; align-items:center; gap:12px; padding:14px 18px; background:rgba(18,28,47,.85); backdrop-filter:blur(8px); position:sticky; top:0; z-index:5; border-bottom:1px solid #22314f; }
+  header .name { font-size:24px; font-weight:800; letter-spacing:.3px; }
+  header .name b { color:var(--accent); }
+  header .ver { font-size:12px; color:var(--muted); border:1px solid #2a3b5e; border-radius:999px; padding:2px 8px; margin-left:auto; }
+  .wrap { max-width:960px; margin:0 auto; padding:16px; }
+  .card { background:var(--panel); border:1px solid #22314f; border-radius:16px; padding:16px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+  h3 { margin:0 0 10px; font-size:17px; letter-spacing:.2px; }
+  .step { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#1b1200; font-weight:800; font-size:13px; margin-right:8px; }
+  .hint { color:var(--muted); font-size:14px; margin:4px 0 10px; }
+  input[type=file] { color:var(--muted); width:100%; padding:10px; background:var(--panel2); border-radius:10px; border:1px dashed #36507f; }
+  canvas { width:100%; border-radius:12px; touch-action:none; background:#000; display:block; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
+  button { font:inherit; font-weight:700; border:0; border-radius:12px; padding:12px 16px; cursor:pointer; color:var(--text); background:var(--panel2); }
+  button:active { transform:scale(.97); }
+  button.primary { background:linear-gradient(180deg,#ffc34d,var(--accent)); color:#1b1200; }
+  button.round { width:56px; height:56px; border-radius:50%; padding:0; font-size:20px; display:inline-flex; align-items:center; justify-content:center; }
+  button.round.big { width:68px; height:68px; background:linear-gradient(180deg,#ffc34d,var(--accent)); color:#1b1200; font-size:26px; }
+  .seg { display:flex; background:var(--panel2); border-radius:12px; padding:4px; gap:4px; }
+  .seg button { background:transparent; padding:10px 14px; border-radius:9px; }
+  .seg button.on { background:var(--accent2); color:#06182e; }
+  .speeds button.on { background:var(--accent); color:#1b1200; box-shadow:0 0 0 3px rgba(255,176,32,.25); }
+  .hidden { display:none; }
+  progress { width:100%; height:14px; accent-color:var(--accent); }
+  select, input[type=range] { width:100%; }
+  select { background:var(--panel2); color:var(--text); border:0; border-radius:10px; padding:12px; font:inherit; }
+  #player { width:100%; border-radius:14px; background:#000; display:block; max-height:60vh; }
+  .controls { display:flex; justify-content:center; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+  .speeds { display:flex; justify-content:center; gap:8px; margin-top:14px; flex-wrap:wrap; }
+  .speeds .lbl { align-self:center; color:var(--muted); font-weight:700; margin-right:4px; }
+  .cards { display:flex; gap:10px; overflow-x:auto; padding:6px 2px 10px; scroll-snap-type:x mandatory; }
+  .pcard { flex:0 0 150px; scroll-snap-align:start; background:var(--panel2); border:2px solid transparent; border-radius:14px; padding:12px; text-align:left; }
+  .pcard.on { border-color:var(--accent); }
+  .pcard .n { font-size:18px; font-weight:800; }
+  .pcard .t { color:var(--muted); font-size:13px; margin-top:2px; font-weight:600; }
+  .tag { display:inline-block; margin-top:6px; font-size:11px; padding:2px 8px; border-radius:999px; background:#0e2a4a; color:#9fd0ff; }
+  .tag.ai { background:#3a2a05; color:#ffd27a; }
+  #msg { margin-top:8px; color:var(--muted); font-size:14px; }
+  .toggles { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .toggles button.on { background:var(--accent2); color:#06182e; }
 </style>
 </head>
 <body>
-<header>Pitch<span>Cut</span> <span class="small">v3.1</span></header>
+<header>
+  <svg width="44" height="44" viewBox="0 0 64 64" aria-label="PitchCut logo">
+    <defs><clipPath id="c"><circle cx="32" cy="32" r="26"/></clipPath></defs>
+    <circle cx="32" cy="32" r="26" fill="#f4f1ea"/>
+    <g clip-path="url(#c)" fill="none" stroke="#e5484d" stroke-width="2.2" stroke-linecap="round">
+      <path d="M14 8 C24 20, 24 44, 14 56"/><path d="M50 8 C40 20, 40 44, 50 56"/>
+      <path d="M17 15 l6 2 M19 23 l6 1.5 M20 32 l6 0 M19 41 l6 -1.5 M17 49 l6 -2"/>
+      <path d="M47 15 l-6 2 M45 23 l-6 1.5 M44 32 l-6 0 M45 41 l-6 -1.5 M47 49 l-6 -2"/>
+    </g>
+    <circle cx="32" cy="32" r="26" fill="none" stroke="#0b1220" stroke-width="2"/>
+    <path d="M6 50 L58 14" stroke="#ffb020" stroke-width="5" stroke-linecap="round"/>
+    <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
+  </svg>
+  <div class="name">Pitch<b>Cut</b></div>
+  <div class="ver">v4</div>
+</header>
+
 <div class="wrap">
 
   <div class="card">
-    <h3>1. Choose your video</h3>
+    <h3><span class="step">1</span>Choose your video</h3>
     <input type="file" id="file" accept="video/*">
-    <div id="loadMsg"></div>
+    <div id="loadMsg" class="hint"></div>
   </div>
 
   <div class="card hidden" id="step2">
-    <h3>2. Drag a box around the pitcher only</h3>
-    <div class="small">Draw it tight: from above his head to just below his feet. Leave out the catcher.</div>
+    <h3><span class="step">2</span>Box the pitcher</h3>
+    <div class="hint">Drag a box tight around Braden, from above his head to just below his feet. Leave out the catcher.</div>
     <canvas id="cv"></canvas>
-    <label>Sensitivity (higher catches more, including extras)
-      <input type="range" id="sens" min="1" max="10" value="7">
-    </label>
-    <button onclick="findPitches()">Find pitches</button>
+    <div class="row">
+      <div class="seg" id="mode">
+        <button data-m="both" class="on">Both</button>
+        <button data-m="motion">Motion only</button>
+        <button data-m="pose">AI pose only</button>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:12px">Sensitivity (higher catches more, including extras)</div>
+    <input type="range" id="sens" min="1" max="10" value="7">
+    <div class="row"><button class="primary" onclick="findPitches()">Find pitches</button></div>
     <progress id="prog" value="0" max="1" class="hidden"></progress>
     <div id="msg"></div>
   </div>
 
   <div class="card hidden" id="step3">
-    <h3>3. Review pitches</h3>
+    <h3><span class="step">3</span>Review pitches</h3>
+    <div class="cards" id="cards"></div>
     <video id="player" controls playsinline muted></video>
-    <div>
-      <strong>Speed:</strong>
-      <button class="alt spd" data-s="1">1x</button>
-      <button class="alt spd" data-s="0.5">0.5x</button>
-      <button class="alt spd" data-s="0.25">0.25x</button>
-      <button class="alt spd" data-s="0.125">0.125x</button>
+    <div class="speeds" id="speeds">
+      <span class="lbl">Speed</span>
+      <button data-s="1" class="on">1x</button>
+      <button data-s="0.5">0.5x</button>
+      <button data-s="0.25">0.25x</button>
+      <button data-s="0.125">0.125x</button>
     </div>
-    <div>
-      <button class="alt" onclick="stepFrame(-1)">&laquo; Frame</button>
-      <button class="alt" onclick="skip(-1)">Back 1s</button>
-      <button onclick="togglePlay()">Play / Pause</button>
-      <button class="alt" onclick="skip(1)">Forward 1s</button>
-      <button class="alt" onclick="stepFrame(1)">Frame &raquo;</button>
+    <div class="controls">
+      <button class="round" onclick="gotoClip(cur-1)" title="Previous pitch">&#9198;</button>
+      <button class="round" onclick="stepFrame(-1)" title="Back one frame">&#9664;&#9664;</button>
+      <button class="round big" id="playBtn" onclick="togglePlay()" title="Play or pause">&#9654;</button>
+      <button class="round" onclick="stepFrame(1)" title="Forward one frame">&#9654;&#9654;</button>
+      <button class="round" onclick="gotoClip(cur+1)" title="Next pitch">&#9197;</button>
     </div>
-    <div>
-      <button class="alt" onclick="gotoClip(cur - 1)">Previous pitch</button>
-      <button class="alt" id="loopBtn" onclick="toggleLoop()">Loop: off</button>
-      <button class="alt" id="reelBtn" onclick="toggleReel()">Play all: off</button>
-      <button class="alt" onclick="gotoClip(cur + 1)">Next pitch</button>
+    <div class="controls">
+      <button onclick="skip(-1)">Back 1s</button>
+      <button onclick="skip(1)">Forward 1s</button>
     </div>
-    <h4 id="count">All pitches</h4>
-    <div id="clipList"></div>
+    <div class="toggles">
+      <button id="loopBtn" onclick="toggleLoop()">Loop: off</button>
+      <button id="reelBtn" onclick="toggleReel()">Play all: off</button>
+    </div>
   </div>
 </div>
 
-<script>
-// ---- Settings you can change ----
-const PRE = 1.0;          // seconds kept before the first big motion (the windup)
-const CLIP_LEN = 5.0;     // seconds kept after the first big motion (windup + throw + 1 second after the catch)
-const LOCKOUT = 8.0;      // seconds to ignore motion after a pitch (covers the return throw)
-const GROUP_GAP = 1.5;    // motion closer together than this counts as one pitch
+<script type="module">
+// ---------------- Settings you can change ----------------
+const PRE = 2.0;           // seconds kept before the ball is thrown
+const POST = 1.0;          // seconds kept after the ball reaches the glove
+const WINDUP_TO_THROW = 1.2; // when only motion is available: seconds from first motion to release
+const THROW_TO_GLOVE = 0.5;  // seconds from release to the glove
+const LOCKOUT = 8.0;       // ignore new pitches for this long after one (covers the return throw)
+const GROUP_GAP = 1.5;     // motion closer together than this is one pitch
 const FPS = 30;
-// ---------------------------------
-const fileInput = document.getElementById('file');
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-const player = document.getElementById('player');
-let url = null, box = null, dragStart = null;
-let clips = [], cur = 0, loop = false, reel = false;
+const POSE_STEP = 1 / 15;  // pose scan samples per second
+const MOTION_STEP = 1 / 10;
+// ----------------------------------------------------------
+import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const player = $('player');
+let url = null, box = null, dragStart = null, mode = 'both';
+let clips = [], cur = 0, loop = false, reel = false, landmarker = null;
 
 function makeVideo(src) {
   return new Promise((resolve, reject) => {
     const v = document.createElement('video');
-    v.muted = true;
-    v.playsInline = true;
-    v.setAttribute('playsinline', '');
-    v.setAttribute('webkit-playsinline', '');
+    v.muted = true; v.playsInline = true;
+    v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
     v.preload = 'auto';
     v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
     document.body.appendChild(v);
@@ -102,14 +155,11 @@ function makeVideo(src) {
     v.addEventListener('loadeddata', ok, { once: true });
     v.addEventListener('canplay', ok, { once: true });
     v.addEventListener('error', () => { if (!finished) { finished = true; reject(new Error('This video could not be opened.')); } }, { once: true });
-    v.src = src;
-    v.load();
-    const p = v.play();
-    if (p && p.catch) p.catch(() => {});
+    v.src = src; v.load();
+    const p = v.play(); if (p && p.catch) p.catch(() => {});
     setTimeout(() => { if (!finished) { finished = true; reject(new Error('Timed out loading the video.')); } }, 30000);
   });
 }
-
 function seek(v, t) {
   return new Promise(res => {
     let done = false;
@@ -120,10 +170,10 @@ function seek(v, t) {
   });
 }
 
-fileInput.onchange = async () => {
-  const f = fileInput.files[0]; if (!f) return;
-  const msg = document.getElementById('loadMsg');
-  msg.textContent = 'Loading video...';
+// ---------- Step 1: load video ----------
+$('file').onchange = async () => {
+  const f = $('file').files[0]; if (!f) return;
+  $('loadMsg').textContent = 'Loading video...';
   try {
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(f);
@@ -133,127 +183,209 @@ fileInput.onchange = async () => {
     ctx.drawImage(v, 0, 0);
     window.firstFrame = ctx.getImageData(0, 0, cv.width, cv.height);
     v.remove();
-    msg.textContent = 'Video loaded.';
-    document.getElementById('step2').classList.remove('hidden');
-    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
-  } catch (e) {
-    msg.textContent = 'Problem: ' + e.message;
-  }
+    $('loadMsg').textContent = 'Video loaded.';
+    $('step2').classList.remove('hidden');
+    $('step2').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) { $('loadMsg').textContent = 'Problem: ' + e.message; }
 };
 
+// ---------- Step 2: draw the box ----------
 function redraw() {
   ctx.putImageData(window.firstFrame, 0, 0);
-  if (box) { ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = Math.max(3, cv.width / 300); ctx.strokeRect(...box); }
+  if (box) { ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, cv.width / 250); ctx.strokeRect(...box); }
 }
 function pos(e) {
   const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e;
   return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
 }
-function down(e) { e.preventDefault(); dragStart = pos(e); }
-function move(e) {
+const down = e => { e.preventDefault(); dragStart = pos(e); };
+const move = e => {
   if (!dragStart) return; e.preventDefault();
   const p = pos(e);
-  box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]),
-         Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
+  box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]), Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
   redraw();
-}
-function up() { dragStart = null; }
+};
+const up = () => { dragStart = null; };
 ['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
 ['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
 ['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
 
-async function findPitches() {
-  if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
-  const sens = parseInt(document.getElementById('sens').value);
-  const threshold = 0.10 - sens * 0.007;   // fraction of changed pixels in the box
-  const minRun = 3;                         // samples in a row above threshold (about 0.3 seconds)
-  const STEP = 1 / 10;                      // sample 10 times per second
-  const msg = document.getElementById('msg');
-  const prog = document.getElementById('prog');
+document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
+  mode = b.dataset.m;
+  document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
+});
 
-  msg.textContent = 'Preparing...';
-  let v;
-  try { v = await makeVideo(url); } catch (e) { msg.textContent = 'Problem: ' + e.message; return; }
-  const dur = v.duration;
+// ---------- Detector 1: motion in the box ----------
+async function motionDetect(v, dur, thresholdFrac, setProgress) {
   const [bx, by, bw, bh] = box.map(Math.round);
   const W = 160, H = Math.max(1, Math.round(160 * bh / bw));
   const small = document.createElement('canvas'); small.width = W; small.height = H;
   const sctx = small.getContext('2d', { willReadFrequently: true });
-
-  prog.classList.remove('hidden'); prog.max = dur;
-
-  // Pass 1: record how much changed in the box at every sample
-  const times = [], levels = [];
-  let prev = null;
-  for (let t = 0; t < dur; t += STEP) {
+  const minRun = 3;
+  const times = [], levels = []; let prev = null;
+  for (let t = 0; t < dur; t += MOTION_STEP) {
     await seek(v, t);
     sctx.drawImage(v, bx, by, bw, bh, 0, 0, W, H);
     const d = sctx.getImageData(0, 0, W, H).data;
     const gray = new Uint8Array(W * H);
     for (let i = 0; i < gray.length; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
     let level = 0;
-    if (prev) {
-      let changed = 0;
-      for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) changed++;
-      level = changed / gray.length;
-    }
-    times.push(t); levels.push(level);
-    prev = gray;
-    prog.value = t;
-    msg.textContent = `Scanning... ${Math.round(t / dur * 100)}%  (keep this screen open)`;
+    if (prev) { let c = 0; for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) c++; level = c / gray.length; }
+    times.push(t); levels.push(level); prev = gray;
+    setProgress(t / dur, 'Detector 1: motion');
   }
-  v.remove();
-
-  // Pass 2: find stretches of sustained motion, with a lockout after each pitch
-  const pitches = [];   // {start, end} of the motion itself
-  let i = 0;
+  const found = []; let i = 0;
   while (i < times.length) {
-    if (levels[i] > threshold) {
-      let j = i;
-      while (j < times.length && levels[j] > threshold) j++;
-      const runLen = j - i;
-      if (runLen >= minRun) {
-        const last = pitches[pitches.length - 1];
-        if (last && times[i] - last.end <= GROUP_GAP) {
-          last.end = times[j - 1];                 // same pitch, extend it
-        } else if (!last || times[i] - last.end >= LOCKOUT) {
-          pitches.push({ start: times[i], end: times[j - 1] });
-        }                                          // else: inside the lockout, ignore
+    if (levels[i] > thresholdFrac) {
+      let j = i; while (j < times.length && levels[j] > thresholdFrac) j++;
+      if (j - i >= minRun) {
+        const last = found[found.length - 1];
+        if (last && times[i] - last.end <= GROUP_GAP) last.end = times[j - 1];
+        else if (!last || times[i] - last.end >= LOCKOUT) found.push({ start: times[i], end: times[j - 1] });
       }
       i = j;
-    } else {
-      i++;
-    }
+    } else i++;
   }
-
-  clips = pitches.map(p => ({
-    start: Math.max(0, p.start - PRE),
-    end: Math.min(dur, p.start + CLIP_LEN)
-  }));
-
-  msg.textContent = `Done. Found ${clips.length} pitches.`;
-  prog.classList.add('hidden');
-  showClips();
+  // motion starts at the windup, so estimate release and glove times
+  return found.map(p => ({ release: p.start + WINDUP_TO_THROW, glove: p.start + WINDUP_TO_THROW + THROW_TO_GLOVE, src: 'motion' }));
 }
 
+// ---------- Detector 2: AI pose (throwing wrist speed) ----------
+async function getLandmarker(setMsg) {
+  if (landmarker) return landmarker;
+  setMsg('Loading the AI model (first time only)...');
+  const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+  landmarker = await PoseLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task' },
+    runningMode: 'IMAGE', numPoses: 1
+  });
+  return landmarker;
+}
+
+async function poseDetect(v, dur, sensitivity, setProgress, setMsg) {
+  const lm = await getLandmarker(setMsg);
+  const [bx, by, bw, bh] = box.map(Math.round);
+  // widen the crop so the throwing arm is not clipped, and scale it up so the model sees a big person
+  const padX = Math.round(bw * 0.6), padY = Math.round(bh * 0.15);
+  const x0 = Math.max(0, bx - padX), y0 = Math.max(0, by - padY);
+  const x1 = Math.min(cv.width, bx + bw + padX), y1 = Math.min(cv.height, by + bh + padY);
+  const cw = x1 - x0, ch = y1 - y0;
+  const scale = Math.max(1, 384 / Math.max(cw, ch));
+  const crop = document.createElement('canvas'); crop.width = Math.round(cw * scale); crop.height = Math.round(ch * scale);
+  const cctx = crop.getContext('2d', { willReadFrequently: true });
+
+  const samples = [];   // {t, speed} fastest wrist speed in body-heights per second
+  let prev = null;
+  for (let t = 0; t < dur; t += POSE_STEP) {
+    await seek(v, t);
+    cctx.drawImage(v, x0, y0, cw, ch, 0, 0, crop.width, crop.height);
+    let speed = 0;
+    try {
+      const res = lm.detect(crop);
+      if (res.landmarks && res.landmarks[0]) {
+        const p = res.landmarks[0];
+        // normalise by body height (nose to ankle) so distance from the camera does not matter
+        const top = p[0].y, bottom = Math.max(p[27].y, p[28].y);
+        const body = Math.max(0.2, bottom - top);
+        const wr = [p[15], p[16]];
+        if (prev && t - prev.t > 0) {
+          let best = 0;
+          for (let k = 0; k < 2; k++) {
+            const dx = (wr[k].x - prev.wr[k].x) * crop.width, dy = (wr[k].y - prev.wr[k].y) * crop.height;
+            const dist = Math.hypot(dx, dy) / (body * crop.height);
+            best = Math.max(best, dist / (t - prev.t));
+          }
+          speed = best;
+        }
+        prev = { t, wr };
+      } else prev = null;
+    } catch (e) { prev = null; }
+    samples.push({ t, speed });
+    setProgress(t / dur, 'Detector 2: AI pose');
+  }
+  // a throw is a burst of very fast wrist movement; higher sensitivity = lower bar
+  const bar = 3.2 - sensitivity * 0.2;   // body-heights per second
+  const found = []; let i = 0;
+  while (i < samples.length) {
+    if (samples[i].speed > bar) {
+      let j = i, peak = i;
+      while (j < samples.length && samples[j].speed > bar * 0.6) { if (samples[j].speed > samples[peak].speed) peak = j; j++; }
+      const last = found[found.length - 1];
+      const t = samples[peak].t;
+      if (!last || t - last.release >= LOCKOUT) found.push({ release: t, glove: t + THROW_TO_GLOVE, src: 'pose' });
+      i = j;
+    } else i++;
+  }
+  return found;
+}
+
+// ---------- Combine and run ----------
+function setProgress(frac, label) {
+  $('prog').value = frac; $('prog').max = 1;
+  $('msg').textContent = `${label}... ${Math.round(frac * 100)}%  (keep this screen open)`;
+}
+async function findPitches() {
+  if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
+  const sens = parseInt($('sens').value);
+  const threshold = 0.10 - sens * 0.007;
+  $('msg').textContent = 'Preparing...'; $('prog').classList.remove('hidden');
+  let v;
+  try { v = await makeVideo(url); } catch (e) { $('msg').textContent = 'Problem: ' + e.message; return; }
+  const dur = v.duration;
+  let motion = [], pose = [], poseNote = '';
+  try {
+    if (mode === 'both' || mode === 'motion') motion = await motionDetect(v, dur, threshold, setProgress);
+    if (mode === 'both' || mode === 'pose') {
+      try { pose = await poseDetect(v, dur, sens, setProgress, m => $('msg').textContent = m); }
+      catch (e) { poseNote = ' (AI pose could not run: ' + e.message + ')'; }
+    }
+  } catch (e) { $('msg').textContent = 'Problem: ' + e.message; v.remove(); return; }
+  v.remove();
+
+  // merge: prefer the pose release time when both detectors agree on a pitch
+  const all = [...pose.map(p => ({ ...p })), ...motion.map(p => ({ ...p }))].sort((a, b) => a.release - b.release);
+  const merged = [];
+  for (const p of all) {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(p.release - last.release) <= 3.0) {
+      if (p.src === 'pose' && last.srcs.indexOf('pose') === -1) { last.release = p.release; last.glove = p.glove; }
+      if (last.srcs.indexOf(p.src) === -1) last.srcs.push(p.src);
+    } else merged.push({ ...p, srcs: [p.src] });
+  }
+  clips = merged.map(p => ({
+    start: Math.max(0, p.release - PRE),
+    end: Math.min(dur, p.glove + POST),
+    srcs: p.srcs
+  }));
+  $('msg').textContent = `Done. Found ${clips.length} pitches.` + poseNote;
+  $('prog').classList.add('hidden');
+  showClips();
+}
+window.findPitches = findPitches;
+
+// ---------- Step 3: review ----------
 function showClips() {
-  document.getElementById('step3').classList.remove('hidden');
-  document.getElementById('count').textContent = `${clips.length} pitches found`;
-  const list = document.getElementById('clipList'); list.innerHTML = '';
+  $('step3').classList.remove('hidden');
+  const box3 = $('cards'); box3.innerHTML = '';
   clips.forEach((c, i) => {
-    const b = document.createElement('button'); b.className = 'alt';
-    b.textContent = `Pitch ${i + 1}  (${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s)`;
-    b.onclick = () => gotoClip(i); list.appendChild(b);
+    const b = document.createElement('button'); b.className = 'pcard';
+    const tags = c.srcs.map(s => `<span class="tag ${s === 'pose' ? 'ai' : ''}">${s === 'pose' ? 'AI pose' : 'Motion'}</span>`).join(' ');
+    b.innerHTML = `<div class="n">Pitch ${i + 1}</div><div class="t">${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s</div>${tags}`;
+    b.onclick = () => gotoClip(i); box3.appendChild(b);
   });
   player.src = url;
   player.onloadeddata = () => gotoClip(0);
-  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+  $('step3').scrollIntoView({ behavior: 'smooth' });
+}
+function highlight() {
+  document.querySelectorAll('.pcard').forEach((el, i) => el.classList.toggle('on', i === cur));
+  const el = document.querySelectorAll('.pcard')[cur]; if (el) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
 function gotoClip(i) {
   if (!clips.length) return;
   cur = (i + clips.length) % clips.length;
   player.currentTime = clips[cur].start;
-  player.play();
+  player.play(); highlight();
 }
 player.addEventListener('timeupdate', () => {
   if (!clips.length) return;
@@ -264,16 +396,19 @@ player.addEventListener('timeupdate', () => {
     else player.pause();
   }
 });
-document.querySelectorAll('.spd').forEach(b => b.onclick = () => {
+player.addEventListener('play', () => $('playBtn').innerHTML = '&#10074;&#10074;');
+player.addEventListener('pause', () => $('playBtn').innerHTML = '&#9654;');
+document.querySelectorAll('#speeds button').forEach(b => b.onclick = () => {
   player.playbackRate = parseFloat(b.dataset.s);
-  document.querySelectorAll('.spd').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
+  document.querySelectorAll('#speeds button').forEach(x => x.classList.toggle('on', x === b));
 });
-function togglePlay() { player.paused ? player.play() : player.pause(); }
-function skip(s) { player.currentTime = Math.max(0, player.currentTime + s); }
-function stepFrame(d) { player.pause(); player.currentTime = Math.max(0, player.currentTime + d / FPS); }
-function toggleLoop() { loop = !loop; document.getElementById('loopBtn').textContent = 'Loop: ' + (loop ? 'on' : 'off'); }
-function toggleReel() { reel = !reel; document.getElementById('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); }
+window.togglePlay = () => player.paused ? player.play() : player.pause();
+window.skip = s => { player.currentTime = Math.max(0, player.currentTime + s); };
+window.stepFrame = d => { player.pause(); player.currentTime = Math.max(0, player.currentTime + d / FPS); };
+window.gotoClip = gotoClip;
+window.toggleLoop = () => { loop = !loop; $('loopBtn').textContent = 'Loop: ' + (loop ? 'on' : 'off'); $('loopBtn').classList.toggle('on', loop); };
+window.toggleReel = () => { reel = !reel; $('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); $('reelBtn').classList.toggle('on', reel); };
+Object.defineProperty(window, 'cur', { get: () => cur });
 </script>
 </body>
 </html>
