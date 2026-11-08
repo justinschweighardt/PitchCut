@@ -19,7 +19,8 @@
   .hint { color:var(--muted); font-size:14px; margin:4px 0 10px; }
   input[type=file] { color:var(--muted); width:100%; padding:10px; background:var(--panel2); border-radius:10px; border:1px dashed #36507f; }
   canvas { width:100%; border-radius:12px; touch-action:none; background:#000; display:block; }
-  #dbg { touch-action:auto; }
+  #dbgGraph { touch-action:auto; }
+  #boxPreview { width:auto; max-width:100%; margin-top:6px; border:1px solid #2a3b5e; border-radius:10px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
   button { font:inherit; font-weight:700; border:0; border-radius:12px; padding:12px 16px; cursor:pointer; color:var(--text); background:var(--panel2); }
   button:active { transform:scale(.97); }
@@ -69,7 +70,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.2</div>
+  <div class="ver">v4.3</div>
 </header>
 
 <div class="wrap">
@@ -82,8 +83,10 @@
 
   <div class="card hidden" id="step2">
     <h3><span class="step">2</span>Box the pitcher</h3>
-    <div class="hint">Drag a box tight around Braden, from above his head to just below his feet. Leave out the catcher.</div>
+    <div class="hint">Drag a box tight around Braden on the mound, from just above his head to just below his feet, with a little room for his arms.</div>
     <canvas id="cv"></canvas>
+    <div class="hint" style="margin-top:12px">This is what PitchCut will watch. Braden should fill this picture.</div>
+    <canvas id="boxPreview" width="1" height="1"></canvas>
     <div class="row">
       <div class="seg" id="mode">
         <button data-m="both" class="on">Both</button>
@@ -136,7 +139,7 @@
 
   <div class="card hidden" id="debugCard">
     <h3>Detection graph</h3>
-    <canvas id="dbg"></canvas>
+    <canvas id="dbgGraph"></canvas>
     <div class="legend"><b class="b">Blue</b> motion in the box. <b class="a">Amber</b> AI throwing-arm speed. <b class="r">Red line</b> AI cutoff. <b class="g">Green lines</b> pitches kept, numbered.</div>
     <div id="peaks"></div>
   </div>
@@ -145,7 +148,7 @@
 <script type="module">
 // ---------------- Settings you can change ----------------
 const PRE = 2.0;             // seconds kept before the ball is thrown
-const POST = 2.5;            // seconds kept after the ball reaches the glove (was 1.0, raised so slow deliveries are not cut off)
+const POST = 2.5;            // seconds kept after the ball reaches the glove
 const THROW_TO_GLOVE = 0.6;  // seconds from release to the glove
 const WINDUP_TO_THROW = 1.2; // motion-only estimate: seconds from first motion to release
 const LOCKOUT = 6.0;         // two pitches cannot be closer together than this (covers the return throw)
@@ -160,7 +163,7 @@ import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@m
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
 const player = $('player');
-let url = null, box = null, dragStart = null, mode = 'both';
+let url = null, box = null, dragStart = null, mode = 'both', frameCanvas = null;
 let clips = [], cur = 0, loop = false, reel = false, landmarker = null;
 
 function makeVideo(src) {
@@ -203,6 +206,10 @@ $('file').onchange = async () => {
     cv.width = v.videoWidth; cv.height = v.videoHeight;
     ctx.drawImage(v, 0, 0);
     window.firstFrame = ctx.getImageData(0, 0, cv.width, cv.height);
+    frameCanvas = document.createElement('canvas');
+    frameCanvas.width = cv.width; frameCanvas.height = cv.height;
+    frameCanvas.getContext('2d').drawImage(cv, 0, 0);
+    box = null;
     v.remove();
     $('loadMsg').textContent = 'Video loaded.';
     $('step2').classList.remove('hidden');
@@ -215,8 +222,17 @@ function redraw() {
   ctx.putImageData(window.firstFrame, 0, 0);
   if (box) { ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, cv.width / 250); ctx.strokeRect(...box); }
 }
+function updatePreview() {
+  if (!box || !frameCanvas || box[2] < 4 || box[3] < 4) return;
+  const p = $('boxPreview');
+  const s = Math.min(320 / box[2], 260 / box[3]);
+  p.width = Math.max(1, Math.round(box[2] * s)); p.height = Math.max(1, Math.round(box[3] * s));
+  const c = p.getContext('2d');
+  c.imageSmoothingEnabled = true;
+  c.drawImage(frameCanvas, box[0], box[1], box[2], box[3], 0, 0, p.width, p.height);
+}
 function pos(e) {
-  const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e;
+  const r = cv.getBoundingClientRect(); const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
   return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
 }
 const down = e => { e.preventDefault(); dragStart = pos(e); };
@@ -226,7 +242,7 @@ const move = e => {
   box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]), Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
   redraw();
 };
-const up = () => { dragStart = null; };
+const up = () => { if (dragStart) { dragStart = null; updatePreview(); } };
 ['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
 ['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
 ['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
@@ -365,7 +381,6 @@ function combine(cands, strict, bothModes) {
       if (last.srcs.indexOf(c.src) === -1) last.srcs.push(c.src);
     } else merged.push({ time: c.time, score: c.score, srcs: [c.src] });
   }
-  // keep the strongest moment in any LOCKOUT window
   const spaced = [];
   for (const m of [...merged].sort((a, b) => b.score - a.score)) {
     if (spaced.some(k => Math.abs(k.time - m.time) < LOCKOUT)) continue;
@@ -373,10 +388,8 @@ function combine(cands, strict, bothModes) {
   }
   if (!spaced.length) return { kept: [], considered: [] };
   const top = Math.max(...spaced.map(m => m.score));
-  // Strictness 1..10: how strong a moment must be compared with the strongest one
-  const relMin = 0.15 + strict * 0.05;           // 0.20 at strictness 1, 0.65 at strictness 10
-  // A moment seen by only one detector must also be clearly strong on its own
-  const soloMin = 1.0 + strict * 0.1;            // 1.1 at strictness 1, 2.0 at strictness 10
+  const relMin = 0.15 + strict * 0.05;
+  const soloMin = 1.0 + strict * 0.1;
   const kept = spaced.filter(m => {
     const both = m.srcs.length > 1;
     if (both || !bothModes) return m.score >= top * relMin;
@@ -396,7 +409,7 @@ function topPeaks(t, y, n, gap) {
 }
 function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
   $('debugCard').classList.remove('hidden');
-  const c = $('dbg'); c.width = 1000; c.height = 260;
+  const c = $('dbgGraph'); c.width = 1000; c.height = 260;
   const g = c.getContext('2d'); g.fillStyle = '#0b1220'; g.fillRect(0, 0, 1000, 260);
   const X = t => 10 + (t / dur) * 980, top = 20, bot = 230;
   g.strokeStyle = '#22314f'; g.fillStyle = '#8fa3bf'; g.font = '14px sans-serif'; g.lineWidth = 1;
@@ -414,6 +427,8 @@ function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
     const by = bot - Math.min(1, bar / mx) * (bot - top);
     g.strokeStyle = '#e5484d'; g.setLineDash([6, 5]); g.beginPath(); g.moveTo(10, by); g.lineTo(990, by); g.stroke(); g.setLineDash([]);
     txt += 'AI could see the pitcher in ' + Math.round(seen * 100) + '% of frames.\n';
+    const pk = topPeaks(pose.t, pose.s, 8, 2);
+    txt += 'AI arm-speed peaks (cutoff ' + bar.toFixed(1) + '): ' + pk.map(i => pose.t[i].toFixed(1) + 's = ' + pose.s[i].toFixed(1)).join(', ') + '\n';
   }
   g.strokeStyle = '#3ddc84'; g.lineWidth = 3; g.fillStyle = '#3ddc84'; g.font = 'bold 16px sans-serif';
   kept.forEach((k, n) => { g.beginPath(); g.moveTo(X(k.time), top); g.lineTo(X(k.time), bot); g.stroke(); g.fillText(String(n + 1), X(k.time) + 4, top + 14); });
