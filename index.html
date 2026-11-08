@@ -18,7 +18,9 @@
   .step { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:var(--accent); color:#1b1200; font-weight:800; font-size:13px; margin-right:8px; }
   .hint { color:var(--muted); font-size:14px; margin:4px 0 10px; }
   input[type=file] { color:var(--muted); width:100%; padding:10px; background:var(--panel2); border-radius:10px; border:1px dashed #36507f; }
+  input[type=number] { width:100%; background:var(--panel2); color:var(--text); border:1px solid #2a3b5e; border-radius:10px; padding:12px; font:inherit; }
   canvas { width:100%; border-radius:12px; touch-action:none; background:#000; display:block; }
+  #dbg { touch-action:auto; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:10px; }
   button { font:inherit; font-weight:700; border:0; border-radius:12px; padding:12px 16px; cursor:pointer; color:var(--text); background:var(--panel2); }
   button:active { transform:scale(.97); }
@@ -31,8 +33,7 @@
   .speeds button.on { background:var(--accent); color:#1b1200; box-shadow:0 0 0 3px rgba(255,176,32,.25); }
   .hidden { display:none; }
   progress { width:100%; height:14px; accent-color:var(--accent); }
-  select, input[type=range] { width:100%; }
-  select { background:var(--panel2); color:var(--text); border:0; border-radius:10px; padding:12px; font:inherit; }
+  input[type=range] { width:100%; }
   #player { width:100%; border-radius:14px; background:#000; display:block; max-height:60vh; }
   .controls { display:flex; justify-content:center; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
   .speeds { display:flex; justify-content:center; gap:8px; margin-top:14px; flex-wrap:wrap; }
@@ -47,6 +48,9 @@
   #msg { margin-top:8px; color:var(--muted); font-size:14px; }
   .toggles { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .toggles button.on { background:var(--accent2); color:#06182e; }
+  #peaks { color:var(--muted); font-size:13px; line-height:1.5; margin-top:8px; white-space:pre-wrap; }
+  .legend { font-size:12px; color:var(--muted); margin-top:6px; }
+  .legend b.a { color:#ffb020; } .legend b.b { color:#3ba3ff; } .legend b.r { color:#e5484d; } .legend b.g { color:#3ddc84; }
 </style>
 </head>
 <body>
@@ -64,7 +68,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4</div>
+  <div class="ver">v4.1</div>
 </header>
 
 <div class="wrap">
@@ -86,6 +90,8 @@
         <button data-m="pose">AI pose only</button>
       </div>
     </div>
+    <div class="hint" style="margin-top:12px">How many pitches are in this video? (optional, but it makes the result much more accurate)</div>
+    <input type="number" id="count" min="1" max="60" placeholder="For example: 3" inputmode="numeric">
     <div class="hint" style="margin-top:12px">Sensitivity (higher catches more, including extras)</div>
     <input type="range" id="sens" min="1" max="10" value="7">
     <div class="row"><button class="primary" onclick="findPitches()">Find pitches</button></div>
@@ -120,19 +126,27 @@
       <button id="reelBtn" onclick="toggleReel()">Play all: off</button>
     </div>
   </div>
+
+  <div class="card hidden" id="debugCard">
+    <h3>Detection graph</h3>
+    <canvas id="dbg"></canvas>
+    <div class="legend"><b class="b">Blue</b> motion in the box. <b class="a">Amber</b> AI throwing-arm speed. <b class="r">Red line</b> AI cutoff. <b class="g">Green lines</b> pitches kept.</div>
+    <div id="peaks"></div>
+  </div>
 </div>
 
 <script type="module">
 // ---------------- Settings you can change ----------------
-const PRE = 2.0;           // seconds kept before the ball is thrown
-const POST = 1.0;          // seconds kept after the ball reaches the glove
-const WINDUP_TO_THROW = 1.2; // when only motion is available: seconds from first motion to release
-const THROW_TO_GLOVE = 0.5;  // seconds from release to the glove
-const LOCKOUT = 8.0;       // ignore new pitches for this long after one (covers the return throw)
-const GROUP_GAP = 1.5;     // motion closer together than this is one pitch
+const PRE = 2.0;             // seconds kept before the ball is thrown
+const POST = 1.0;            // seconds kept after the ball reaches the glove
+const THROW_TO_GLOVE = 0.6;  // seconds from release to the glove
+const WINDUP_TO_THROW = 1.2; // motion-only estimate: seconds from first motion to release
+const LOCKOUT = 6.0;         // two pitches cannot be closer together than this (covers the return throw)
+const GROUP_GAP = 1.5;       // motion closer together than this is one burst
+const MERGE_WINDOW = 3.0;    // motion and AI hits this close together count as the same pitch
 const FPS = 30;
-const POSE_STEP = 1 / 15;  // pose scan samples per second
-const MOTION_STEP = 1 / 10;
+const POSE_STEP = 1 / 15;    // AI scan samples per second
+const MOTION_STEP = 1 / 10;  // motion scan samples per second
 // ----------------------------------------------------------
 import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 
@@ -215,42 +229,50 @@ document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
 });
 
+function setProgress(frac, label) {
+  $('prog').value = frac; $('prog').max = 1;
+  $('msg').textContent = `${label}... ${Math.round(frac * 100)}%  (keep this screen open)`;
+}
+
 // ---------- Detector 1: motion in the box ----------
-async function motionDetect(v, dur, thresholdFrac, setProgress) {
+async function motionScan(v, dur) {
   const [bx, by, bw, bh] = box.map(Math.round);
   const W = 160, H = Math.max(1, Math.round(160 * bh / bw));
   const small = document.createElement('canvas'); small.width = W; small.height = H;
   const sctx = small.getContext('2d', { willReadFrequently: true });
-  const minRun = 3;
-  const times = [], levels = []; let prev = null;
-  for (let t = 0; t < dur; t += MOTION_STEP) {
-    await seek(v, t);
+  const t = [], l = []; let prev = null;
+  for (let x = 0; x < dur; x += MOTION_STEP) {
+    await seek(v, x);
     sctx.drawImage(v, bx, by, bw, bh, 0, 0, W, H);
     const d = sctx.getImageData(0, 0, W, H).data;
     const gray = new Uint8Array(W * H);
     for (let i = 0; i < gray.length; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
     let level = 0;
     if (prev) { let c = 0; for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) c++; level = c / gray.length; }
-    times.push(t); levels.push(level); prev = gray;
-    setProgress(t / dur, 'Detector 1: motion');
+    t.push(x); l.push(level); prev = gray;
+    setProgress(x / dur, 'Detector 1: motion');
   }
-  const found = []; let i = 0;
-  while (i < times.length) {
-    if (levels[i] > thresholdFrac) {
-      let j = i; while (j < times.length && levels[j] > thresholdFrac) j++;
+  return { t, l };
+}
+function motionEvents(series, threshold) {
+  const { t, l } = series; const out = []; const minRun = 3; let i = 0;
+  const runs = [];
+  while (i < t.length) {
+    if (l[i] > threshold) {
+      let j = i, peak = 0; while (j < t.length && l[j] > threshold) { peak = Math.max(peak, l[j]); j++; }
       if (j - i >= minRun) {
-        const last = found[found.length - 1];
-        if (last && times[i] - last.end <= GROUP_GAP) last.end = times[j - 1];
-        else if (!last || times[i] - last.end >= LOCKOUT) found.push({ start: times[i], end: times[j - 1] });
+        const last = runs[runs.length - 1];
+        if (last && t[i] - last.end <= GROUP_GAP) { last.end = t[j - 1]; last.peak = Math.max(last.peak, peak); }
+        else runs.push({ start: t[i], end: t[j - 1], peak });
       }
       i = j;
     } else i++;
   }
-  // motion starts at the windup, so estimate release and glove times
-  return found.map(p => ({ release: p.start + WINDUP_TO_THROW, glove: p.start + WINDUP_TO_THROW + THROW_TO_GLOVE, src: 'motion' }));
+  runs.forEach(r => out.push({ time: r.start + WINDUP_TO_THROW, score: r.peak / threshold, src: 'motion' }));
+  return out;
 }
 
-// ---------- Detector 2: AI pose (throwing wrist speed) ----------
+// ---------- Detector 2: AI pose (throwing arm speed) ----------
 async function getLandmarker(setMsg) {
   if (landmarker) return landmarker;
   setMsg('Loading the AI model (first time only)...');
@@ -261,11 +283,13 @@ async function getLandmarker(setMsg) {
   });
   return landmarker;
 }
-
-async function poseDetect(v, dur, sensitivity, setProgress, setMsg) {
+function p90(arr) {
+  const a = arr.filter(x => x > 0).sort((x, y) => x - y);
+  return a.length ? a[Math.floor(a.length * 0.9)] : 0;
+}
+async function poseScan(v, dur, setMsg) {
   const lm = await getLandmarker(setMsg);
   const [bx, by, bw, bh] = box.map(Math.round);
-  // widen the crop so the throwing arm is not clipped, and scale it up so the model sees a big person
   const padX = Math.round(bw * 0.6), padY = Math.round(bh * 0.15);
   const x0 = Math.max(0, bx - padX), y0 = Math.max(0, by - padY);
   const x1 = Math.min(cv.width, bx + bw + padX), y1 = Math.min(cv.height, by + bh + padY);
@@ -274,90 +298,150 @@ async function poseDetect(v, dur, sensitivity, setProgress, setMsg) {
   const crop = document.createElement('canvas'); crop.width = Math.round(cw * scale); crop.height = Math.round(ch * scale);
   const cctx = crop.getContext('2d', { willReadFrequently: true });
 
-  const samples = [];   // {t, speed} fastest wrist speed in body-heights per second
-  let prev = null;
-  for (let t = 0; t < dur; t += POSE_STEP) {
-    await seek(v, t);
+  const rec = [];
+  for (let x = 0; x < dur; x += POSE_STEP) {
+    await seek(v, x);
     cctx.drawImage(v, x0, y0, cw, ch, 0, 0, crop.width, crop.height);
-    let speed = 0;
+    let r = { t: x, ok: false };
     try {
       const res = lm.detect(crop);
-      if (res.landmarks && res.landmarks[0]) {
-        const p = res.landmarks[0];
-        // normalise by body height (nose to ankle) so distance from the camera does not matter
-        const top = p[0].y, bottom = Math.max(p[27].y, p[28].y);
-        const body = Math.max(0.2, bottom - top);
-        const wr = [p[15], p[16]];
-        if (prev && t - prev.t > 0) {
-          let best = 0;
-          for (let k = 0; k < 2; k++) {
-            const dx = (wr[k].x - prev.wr[k].x) * crop.width, dy = (wr[k].y - prev.wr[k].y) * crop.height;
-            const dist = Math.hypot(dx, dy) / (body * crop.height);
-            best = Math.max(best, dist / (t - prev.t));
-          }
-          speed = best;
-        }
-        prev = { t, wr };
-      } else prev = null;
-    } catch (e) { prev = null; }
-    samples.push({ t, speed });
-    setProgress(t / dur, 'Detector 2: AI pose');
+      const p = res.landmarks && res.landmarks[0];
+      if (p) {
+        const vis = [p[15].visibility == null ? 1 : p[15].visibility, p[16].visibility == null ? 1 : p[16].visibility];
+        let body = Math.max(p[27].y, p[28].y) - p[0].y;
+        if (!(body > 0.3)) body = ((p[23].y + p[24].y) / 2 - p[0].y) * 1.8;
+        if (body > 0.2) r = { t: x, ok: true, vis, body: body * crop.height,
+          wr: [{ x: p[15].x * crop.width, y: p[15].y * crop.height }, { x: p[16].x * crop.width, y: p[16].y * crop.height }] };
+      }
+    } catch (e) {}
+    rec.push(r);
+    setProgress(x / dur, 'Detector 2: AI pose');
   }
-  // a throw is a burst of very fast wrist movement; higher sensitivity = lower bar
-  const bar = 3.2 - sensitivity * 0.2;   // body-heights per second
-  const found = []; let i = 0;
-  while (i < samples.length) {
-    if (samples[i].speed > bar) {
-      let j = i, peak = i;
-      while (j < samples.length && samples[j].speed > bar * 0.6) { if (samples[j].speed > samples[peak].speed) peak = j; j++; }
-      const last = found[found.length - 1];
-      const t = samples[peak].t;
-      if (!last || t - last.release >= LOCKOUT) found.push({ release: t, glove: t + THROW_TO_GLOVE, src: 'pose' });
+  // wrist speed in body-heights per second, for each wrist
+  const sp = [[], []];
+  for (let i = 0; i < rec.length; i++) {
+    for (let k = 0; k < 2; k++) {
+      let s = 0; const a = rec[i], b = rec[i - 1];
+      if (i > 0 && a.ok && b.ok && a.vis[k] > 0.4 && b.vis[k] > 0.4) {
+        const dt = a.t - b.t, body = (a.body + b.body) / 2;
+        s = Math.hypot(a.wr[k].x - b.wr[k].x, a.wr[k].y - b.wr[k].y) / body / dt;
+        if (s > 25) s = 0;   // impossible speed: tracking glitch
+      }
+      sp[k].push(s);
+    }
+  }
+  const arm = p90(sp[0]) >= p90(sp[1]) ? 0 : 1;   // the throwing arm moves fastest
+  const seen = rec.filter(r => r.ok).length / Math.max(1, rec.length);
+  return { t: rec.map(r => r.t), s: sp[arm], seen };
+}
+function poseEvents(series, bar) {
+  const { t, s } = series; const out = []; let i = 0;
+  while (i < s.length) {
+    if (s[i] > bar * 0.5) {
+      let j = i, peak = i, above = 0;
+      while (j < s.length && s[j] > bar * 0.5) { if (s[j] > s[peak]) peak = j; above++; j++; }
+      if (s[peak] > bar && above >= 2) out.push({ time: t[peak], score: s[peak] / bar, src: 'pose' });
       i = j;
     } else i++;
   }
-  return found;
+  return out;
 }
 
-// ---------- Combine and run ----------
-function setProgress(frac, label) {
-  $('prog').value = frac; $('prog').max = 1;
-  $('msg').textContent = `${label}... ${Math.round(frac * 100)}%  (keep this screen open)`;
+// ---------- Combine ----------
+function combine(cands, count) {
+  const sorted = [...cands].sort((a, b) => a.time - b.time);
+  const merged = [];
+  for (const c of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && c.time - last.time <= MERGE_WINDOW) {
+      last.score += c.score;
+      if (c.src === 'pose' && last.srcs.indexOf('pose') === -1) last.time = c.time;
+      if (last.srcs.indexOf(c.src) === -1) last.srcs.push(c.src);
+    } else merged.push({ time: c.time, score: c.score, srcs: [c.src] });
+  }
+  const keep = [];
+  for (const m of [...merged].sort((a, b) => b.score - a.score)) {
+    if (keep.some(k => Math.abs(k.time - m.time) < LOCKOUT)) continue;
+    keep.push(m);
+    if (count && keep.length >= count) break;
+  }
+  return keep.sort((a, b) => a.time - b.time);
 }
+
+// ---------- Debug graph ----------
+function topPeaks(t, y, n, gap) {
+  const idx = [];
+  for (let i = 1; i < y.length - 1; i++) if (y[i] > y[i-1] && y[i] >= y[i+1] && y[i] > 0) idx.push(i);
+  idx.sort((a, b) => y[b] - y[a]);
+  const out = [];
+  for (const i of idx) { if (out.every(o => Math.abs(t[o] - t[i]) >= gap)) out.push(i); if (out.length >= n) break; }
+  return out.sort((a, b) => t[a] - t[b]);
+}
+function drawDebug(dur, motion, pose, bar, threshold, kept, seen) {
+  $('debugCard').classList.remove('hidden');
+  const c = $('dbg'); c.width = 1000; c.height = 260;
+  const g = c.getContext('2d'); g.fillStyle = '#0b1220'; g.fillRect(0, 0, 1000, 260);
+  const X = t => 10 + (t / dur) * 980, top = 20, bot = 230;
+  g.strokeStyle = '#22314f'; g.fillStyle = '#8fa3bf'; g.font = '14px sans-serif'; g.lineWidth = 1;
+  for (let s = 0; s <= dur; s += 10) { g.beginPath(); g.moveTo(X(s), top); g.lineTo(X(s), bot); g.stroke(); g.fillText(s + 's', X(s) + 2, 250); }
+  const line = (ts, ys, max, color) => {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
+    ys.forEach((y, i) => { const px = X(ts[i]), py = bot - Math.min(1, y / max) * (bot - top); i ? g.lineTo(px, py) : g.moveTo(px, py); });
+    g.stroke();
+  };
+  let txt = '';
+  if (motion) { const mx = Math.max(threshold * 2, ...motion.l); line(motion.t, motion.l, mx, '#3ba3ff'); }
+  if (pose) {
+    const mx = Math.max(bar * 1.6, ...pose.s);
+    line(pose.t, pose.s, mx, '#ffb020');
+    const by = bot - Math.min(1, bar / mx) * (bot - top);
+    g.strokeStyle = '#e5484d'; g.setLineDash([6, 5]); g.beginPath(); g.moveTo(10, by); g.lineTo(990, by); g.stroke(); g.setLineDash([]);
+    const pk = topPeaks(pose.t, pose.s, 8, 2);
+    txt += 'AI arm-speed peaks (cutoff ' + bar.toFixed(1) + '): ' + pk.map(i => pose.t[i].toFixed(1) + 's = ' + pose.s[i].toFixed(1)).join(', ') + '\n';
+    txt += 'AI could see the pitcher in ' + Math.round(seen * 100) + '% of frames.\n';
+  }
+  if (motion) {
+    const pk = topPeaks(motion.t, motion.l, 8, 2);
+    txt += 'Motion peaks (cutoff ' + threshold.toFixed(3) + '): ' + pk.map(i => motion.t[i].toFixed(1) + 's = ' + motion.l[i].toFixed(3)).join(', ') + '\n';
+  }
+  g.strokeStyle = '#3ddc84'; g.lineWidth = 3;
+  kept.forEach(k => { g.beginPath(); g.moveTo(X(k.time), top); g.lineTo(X(k.time), bot); g.stroke(); });
+  txt += 'Kept pitch moments: ' + kept.map(k => k.time.toFixed(1) + 's').join(', ');
+  $('peaks').textContent = txt;
+}
+
+// ---------- Run ----------
 async function findPitches() {
   if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
   const sens = parseInt($('sens').value);
+  const count = parseInt($('count').value) || 0;
   const threshold = 0.10 - sens * 0.007;
+  const bar = 7.0 - sens * 0.4;     // body-heights per second
   $('msg').textContent = 'Preparing...'; $('prog').classList.remove('hidden');
   let v;
   try { v = await makeVideo(url); } catch (e) { $('msg').textContent = 'Problem: ' + e.message; return; }
   const dur = v.duration;
-  let motion = [], pose = [], poseNote = '';
+  let motion = null, pose = null, note = '';
   try {
-    if (mode === 'both' || mode === 'motion') motion = await motionDetect(v, dur, threshold, setProgress);
+    if (mode === 'both' || mode === 'motion') motion = await motionScan(v, dur);
     if (mode === 'both' || mode === 'pose') {
-      try { pose = await poseDetect(v, dur, sens, setProgress, m => $('msg').textContent = m); }
-      catch (e) { poseNote = ' (AI pose could not run: ' + e.message + ')'; }
+      try { pose = await poseScan(v, dur, m => $('msg').textContent = m); }
+      catch (e) { note = ' (AI pose could not run: ' + e.message + ')'; }
     }
   } catch (e) { $('msg').textContent = 'Problem: ' + e.message; v.remove(); return; }
   v.remove();
 
-  // merge: prefer the pose release time when both detectors agree on a pitch
-  const all = [...pose.map(p => ({ ...p })), ...motion.map(p => ({ ...p }))].sort((a, b) => a.release - b.release);
-  const merged = [];
-  for (const p of all) {
-    const last = merged[merged.length - 1];
-    if (last && Math.abs(p.release - last.release) <= 3.0) {
-      if (p.src === 'pose' && last.srcs.indexOf('pose') === -1) { last.release = p.release; last.glove = p.glove; }
-      if (last.srcs.indexOf(p.src) === -1) last.srcs.push(p.src);
-    } else merged.push({ ...p, srcs: [p.src] });
-  }
-  clips = merged.map(p => ({
-    start: Math.max(0, p.release - PRE),
-    end: Math.min(dur, p.glove + POST),
-    srcs: p.srcs
+  const cands = [];
+  if (motion) cands.push(...motionEvents(motion, threshold));
+  if (pose) cands.push(...poseEvents(pose, bar));
+  const kept = combine(cands, count);
+  clips = kept.map(k => ({
+    start: Math.max(0, k.time - PRE),
+    end: Math.min(dur, k.time + THROW_TO_GLOVE + POST),
+    srcs: k.srcs
   }));
-  $('msg').textContent = `Done. Found ${clips.length} pitches.` + poseNote;
+  drawDebug(dur, motion, pose, bar, threshold, kept, pose ? pose.seen : 0);
+  $('msg').textContent = `Done. Found ${clips.length} pitches.` + note;
   $('prog').classList.add('hidden');
   showClips();
 }
