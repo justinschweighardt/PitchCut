@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#101a29">
-<title>PitchCut — AI Pitch Candidate Finder</title>
+<title>PitchCut AI — Pitch Candidate Finder</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1320;--panel:#142238;--muted:#a9bbcf;--accent:#59c7ff;--line:#2a405b;--good:#79d6a1;--warn:#ffd27a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:#eef5fc;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
 header{padding:16px 18px;background:#111e30;border-bottom:1px solid var(--line);font-size:22px;font-weight:850}
 header span{color:var(--accent)}
-main{max-width:920px;margin:auto;padding:15px}
+main{max-width:960px;margin:auto;padding:15px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;margin:0 0 14px}
 h2{font-size:18px;margin:0 0 9px}
 p{color:var(--muted);margin:8px 0}
@@ -19,11 +19,10 @@ button{border:0;border-radius:9px;background:var(--accent);color:#062033;font-we
 button.secondary{background:#2b4059;color:#eef5fc}
 button:disabled{opacity:.45}
 input[type=file]{max-width:100%;padding:8px 0}
-input[type=range]{width:100%}
-video,canvas{display:block;width:100%;max-height:52vh;background:#000;border-radius:10px;margin-top:10px}
-canvas{touch-action:none;cursor:crosshair}
-.hidden{display:none!important}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+video{display:block;width:100%;max-height:58vh;background:#000;border-radius:10px}
+.preview{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;margin-top:10px}
+.preview video{width:100%;height:auto;max-height:58vh;object-fit:contain}
+#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none;pointer-events:auto}
 .status{margin-top:10px;overflow-wrap:anywhere}
 .small,small{font-size:13px;color:var(--muted)}
 progress{width:100%;height:18px;margin-top:10px}
@@ -35,6 +34,7 @@ a{color:var(--accent);font-weight:750}
 .notice{border-left:3px solid var(--warn);padding:8px 11px;background:#202b39;border-radius:5px;color:#e7edf5}
 .meter{height:8px;background:#26384e;border-radius:8px;overflow:hidden}
 .meter>div{height:100%;width:0;background:var(--accent)}
+.hidden{display:none!important}
 </style>
 </head>
 <body>
@@ -44,19 +44,23 @@ a{color:var(--accent);font-weight:750}
 <section class="card">
 <h2>1. Choose Brayden’s video</h2>
 <input id="file" type="file" accept="video/*">
-<div id="loadStatus" class="status">Choose a video from Photos or Files. Video analysis runs locally in this browser.</div>
-<video id="source" controls playsinline preload="metadata" class="hidden"></video>
+<div id="loadStatus" class="status">Choose a video from Photos or Files. The video is analyzed locally in this browser.</div>
 </section>
 
-<section id="roiStep" class="card hidden">
-<h2>2. Mark the pitcher</h2>
-<p>Pause the video on a clear frame, then draw a box around Brayden. Make the box large enough to include his full body and throwing arm, but avoid including other players if possible.</p>
-<canvas id="roiCanvas"></canvas>
-<div class="row">
-<button id="scanBtn" disabled>Run AI pitch scan</button>
-<button id="clearBox" class="secondary">Clear box</button>
+<section id="selectStep" class="card hidden">
+<h2>2. Show the pitcher and mark his area</h2>
+<p>Use the visible video below. Press play, then pause on a clear frame. The blue selection layer is transparent and sits directly over the video—there is no separate black preview box.</p>
+<div class="preview">
+  <video id="source" controls playsinline webkit-playsinline preload="auto"></video>
+  <canvas id="overlay"></canvas>
 </div>
-<p class="small">The pose model tracks body landmarks. PitchCut then looks for a pitching-like sequence of arm, torso, and leg movement. Pixel-motion detection runs alongside it as a safety net.</p>
+<div class="row">
+<button id="playBtn" class="secondary">Play / Pause video</button>
+<button id="clearBox" class="secondary">Clear box</button>
+<button id="scanBtn" disabled>Run AI pitch scan</button>
+</div>
+<p id="boxStatus" class="small">After pausing on a clear frame, drag a box around Brayden’s full body and throwing arm.</p>
+<p class="small">If the video preview itself remains black, tap the video’s play control once and wait for a picture to appear. The selection layer does not capture or copy a video frame.</p>
 </section>
 
 <section id="scanStep" class="card hidden">
@@ -69,373 +73,325 @@ a{color:var(--accent);font-weight:750}
 <button id="rescanBtn" class="secondary">Rescan video</button>
 <button id="selectAllBtn" class="secondary">Select all</button>
 <button id="selectNoneBtn" class="secondary">Select none</button>
-<button id="exportBtn" disabled>Export selected clips</button>
 </div>
-<p class="small">Each candidate includes 2 seconds before the detected movement and 1 second after. Review the list. PitchCut deliberately keeps uncertain candidates rather than silently rejecting them.</p>
+<p class="small">Each candidate includes 2 seconds before detected movement and 1 second after. Review the list; uncertain candidates are retained rather than silently discarded.</p>
 <div id="clips"></div>
 </section>
 
-<section id="exportStep" class="card hidden">
-<h2>4. Export your continuous video</h2>
-<div id="exportStatus" class="status">Select candidates, then export.</div>
-<progress id="exportProgress" class="hidden" max="100" value="0"></progress>
-<p><a id="download" class="hidden" download>Download edited video</a></p>
-<p class="small">Export format depends on browser support. On iPhone, keep Safari open and the screen awake while exporting. If Safari does not support the required recording format, use a desktop browser.</p>
-</section>
-
 <section class="card">
-<h2>What the AI does — and does not do</h2>
-<p>PitchCut uses Google MediaPipe Pose Landmarker, a machine-learning model that estimates 33 body landmarks. The pitching-sequence score is a rule-based analysis of those landmarks, not a baseball-specific model trained on labeled pitches.</p>
-<p class="notice">This is AI-assisted candidate detection, not guaranteed pitch recognition. It can miss pitches when Brayden is very small, occluded, or poorly lit. It can also flag non-pitch movement. The motion backup and manual review are included to reduce missed pitches.</p>
-<p class="small">The video itself is processed on your device. MediaPipe’s library/model are downloaded from Google’s public hosting when you run the scan. MediaPipe documentation notes that video input is processed on-device; its library may send usage metrics.</p>
+<h2>What the AI does—and does not do</h2>
+<p>PitchCut loads Google MediaPipe Pose Landmarker, a machine-learning model that estimates body landmarks. PitchCut then applies rule-based movement thresholds to identify possible pitching sequences. Pixel-motion detection runs as a backup.</p>
+<p class="notice">This is AI-assisted candidate detection, not a baseball-specific model trained on labeled pitching footage. It can miss pitches or flag other movements. Review the candidates before relying on them.</p>
+<p class="small">Video processing runs in your browser. The MediaPipe code and model are downloaded from Google-hosted public files when the scan starts. Keep Safari open and prevent the phone from sleeping during analysis.</p>
 </section>
 </main>
 
 <script type="module">
-import {
-  FilesetResolver,
-  PoseLandmarker
-} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
+import {FilesetResolver, PoseLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
 
-const $=id=>document.getElementById(id);
-const video=$('source');
-const canvas=$('roiCanvas');
-const ctx=canvas.getContext('2d',{willReadFrequently:true});
+const $ = id => document.getElementById(id);
+const video = $("source");
+const overlay = $("overlay");
+const octx = overlay.getContext("2d");
+const PRE = 2, POST = 1, SAMPLE = 0.25;
+let fileURL = null, poseLandmarker = null, box = null, dragStart = null;
+let candidates = [], selected = new Set(), busy = false;
 
-const PRE=2;
-const POST=1;
-const SAMPLE=.25;
-const POSE_MODEL='https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
+function setStatus(id, message){ $(id).textContent = message; }
+function setMeter(value){ $("modelMeter").style.width = `${value}%`; }
+function wait(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
 
-let fileURL=null;
-let exportURL=null;
-let firstFrame=null;
-let box=null;
-let drag=null;
-let poseLandmarker=null;
-let busy=false;
-let candidates=[];
-let selected=new Set();
-
-const fmt=t=>`${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
-
-function status(id,s){
-  $(id).textContent=s;
+function syncOverlaySize(){
+  if(!video.videoWidth || !video.videoHeight) return;
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+  drawBox();
 }
 
-function setMeter(p){
-  $('modelMeter').style.width=`${Math.max(0,Math.min(100,p))}%`;
+function drawBox(){
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  if(!box) return;
+  octx.strokeStyle = "#59c7ff";
+  octx.lineWidth = Math.max(5, overlay.width / 350);
+  octx.fillStyle = "rgba(89,199,255,.10)";
+  octx.fillRect(...box);
+  octx.strokeRect(...box);
 }
 
-function seek(t){
-  return new Promise((resolve,reject)=>{
-    if(Math.abs(video.currentTime-t)<.015)return resolve();
+function pointerPosition(event){
+  const rect = overlay.getBoundingClientRect();
+  return [
+    (event.clientX - rect.left) * overlay.width / rect.width,
+    (event.clientY - rect.top) * overlay.height / rect.height
+  ];
+}
 
-    let done=false;
+overlay.addEventListener("pointerdown", event => {
+  if(!video.videoWidth) return;
+  event.preventDefault();
+  overlay.setPointerCapture(event.pointerId);
+  dragStart = pointerPosition(event);
+  box = [dragStart[0], dragStart[1], 0, 0];
+  drawBox();
+});
 
-    const finish=ok=>{
-      if(done)return;
-      done=true;
+overlay.addEventListener("pointermove", event => {
+  if(!dragStart) return;
+  event.preventDefault();
+  const p = pointerPosition(event);
+  box = [
+    Math.min(dragStart[0], p[0]),
+    Math.min(dragStart[1], p[1]),
+    Math.abs(p[0] - dragStart[0]),
+    Math.abs(p[1] - dragStart[1])
+  ];
+  drawBox();
+});
+
+function endDrag(){ dragStart = null; }
+overlay.addEventListener("pointerup", endDrag);
+overlay.addEventListener("pointercancel", endDrag);
+
+function seekTo(time){
+  return new Promise((resolve, reject) => {
+    const target = Math.max(0, Math.min(time, Math.max(0, video.duration - 0.04)));
+    if(Math.abs(video.currentTime - target) < 0.02 && video.readyState >= 2){
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+      return;
+    }
+
+    let finished = false;
+
+    const cleanup = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
       clearTimeout(timer);
-      video.removeEventListener('seeked',yes);
-      video.removeEventListener('error',no);
-      ok?resolve():reject(Error('Could not seek in this video.'));
     };
 
-    const yes=()=>finish(true);
-    const no=()=>finish(false);
-    const timer=setTimeout(()=>finish(false),5000);
+    const done = () => {
+      if(finished) return;
+      finished = true;
+      cleanup();
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    };
 
-    video.addEventListener('seeked',yes,{once:true});
-    video.addEventListener('error',no,{once:true});
+    const onSeeked = () => done();
 
-    video.currentTime=Math.min(
-      Math.max(0,t),
-      Math.max(0,video.duration-.025)
-    );
+    const onError = () => {
+      if(finished) return;
+      finished = true;
+      cleanup();
+      reject(new Error("The browser could not seek to that video frame."));
+    };
+
+    const timer = setTimeout(() => {
+      if(video.readyState >= 2) done();
+      else onError();
+    }, 7000);
+
+    video.addEventListener("seeked", onSeeked, {once:true});
+    video.addEventListener("error", onError, {once:true});
+    video.currentTime = target;
   });
 }
 
-function drawFrame(){
-  if(!firstFrame)return;
-  ctx.putImageData(firstFrame,0,0);
+$("file").addEventListener("change", async () => {
+  const file = $("file").files?.[0];
+  if(!file) return;
 
-  if(box){
-    ctx.strokeStyle='#59c7ff';
-    ctx.lineWidth=Math.max(3,canvas.width/300);
-    ctx.strokeRect(...box);
+  if(fileURL) URL.revokeObjectURL(fileURL);
+  fileURL = URL.createObjectURL(file);
+  box = null;
+  candidates = [];
+  selected.clear();
+
+  video.pause();
+  video.src = fileURL;
+  video.load();
+
+  setStatus("loadStatus", `Opening ${file.name}…`);
+
+  try{
+    await new Promise((resolve, reject) => {
+      if(video.readyState >= 2 && video.videoWidth) return resolve();
+
+      const timer = setTimeout(() => reject(new Error("The video metadata loaded, but Safari did not decode a preview frame. Tap Play on the video and try again.")), 30000);
+
+      video.addEventListener("loadeddata", () => {
+        clearTimeout(timer);
+        resolve();
+      }, {once:true});
+
+      video.addEventListener("error", () => {
+        clearTimeout(timer);
+        reject(new Error("This video format could not be decoded by this browser."));
+      }, {once:true});
+    });
+
+    syncOverlaySize();
+    $("selectStep").classList.remove("hidden");
+    $("scanStep").classList.remove("hidden");
+    $("scanBtn").disabled = false;
+
+    setStatus("loadStatus", `Video loaded: ${video.duration.toFixed(1)} seconds · ${video.videoWidth} × ${video.videoHeight}.`);
+    setStatus("boxStatus", "Pause on a frame where Brayden is visible, then drag a box around his full body.");
+
+    $("selectStep").scrollIntoView({behavior:"smooth"});
+
+  }catch(error){
+    setStatus("loadStatus", error.message);
   }
-}
+});
 
-function point(e){
-  const r=canvas.getBoundingClientRect();
-  return [
-    (e.clientX-r.left)*canvas.width/r.width,
-    (e.clientY-r.top)*canvas.height/r.height
-  ];
-}
+video.addEventListener("loadedmetadata", syncOverlaySize);
+video.addEventListener("resize", syncOverlaySize);
 
-canvas.onpointerdown=e=>{
-  if(!firstFrame)return;
-  canvas.setPointerCapture(e.pointerId);
-  drag=point(e);
-  box=[...drag,0,0];
-  drawFrame();
+$("playBtn").onclick = () => video.paused ? video.play().catch(() => {}) : video.pause();
+
+$("clearBox").onclick = () => {
+  box = null;
+  drawBox();
+  setStatus("boxStatus", "Box cleared. Draw a new box around Brayden.");
 };
-
-canvas.onpointermove=e=>{
-  if(!drag)return;
-  const p=point(e);
-
-  box=[
-    Math.min(drag[0],p[0]),
-    Math.min(drag[1],p[1]),
-    Math.abs(p[0]-drag[0]),
-    Math.abs(p[1]-drag[1])
-  ];
-
-  drawFrame();
-};
-
-canvas.onpointerup=()=>drag=null;
-
-$('clearBox').onclick=()=>{
-  box=null;
-  drawFrame();
-};
-
-fileInputSetup();
-
-function fileInputSetup(){
-  $('file').onchange=async()=>{
-    const f=$('file').files?.[0];
-    if(!f)return;
-
-    if(fileURL)URL.revokeObjectURL(fileURL);
-    if(exportURL)URL.revokeObjectURL(exportURL);
-
-    fileURL=URL.createObjectURL(f);
-    video.src=fileURL;
-    video.classList.remove('hidden');
-
-    status('loadStatus',`Loading ${f.name}…`);
-
-    try{
-      await new Promise((r,j)=>{
-        video.onloadedmetadata=r;
-        video.onerror=()=>j(Error('This video format could not be opened.'));
-      });
-
-      video.pause();
-      await seek(Math.min(1,Math.max(0,video.duration-.05)));
-
-      canvas.width=video.videoWidth;
-      canvas.height=video.videoHeight;
-
-      ctx.drawImage(video,0,0);
-      firstFrame=ctx.getImageData(0,0,canvas.width,canvas.height);
-
-      box=null;
-      drawFrame();
-
-      $('roiStep').classList.remove('hidden');
-      $('scanStep').classList.remove('hidden');
-      $('scanBtn').disabled=false;
-
-      status(
-        'loadStatus',
-        `Loaded ${f.name} • ${video.duration.toFixed(1)} seconds • ${video.videoWidth}×${video.videoHeight}`
-      );
-
-      status('scanStatus','Draw a box around Brayden, then run the AI scan.');
-
-    }catch(e){
-      status('loadStatus',e.message);
-    }
-  };
-}
 
 async function loadAI(){
-  if(poseLandmarker)return poseLandmarker;
+  if(poseLandmarker) return poseLandmarker;
 
-  status('modelStatus','Downloading AI pose model (first use only)…');
+  setStatus("modelStatus", "Loading MediaPipe pose model. First use requires an internet connection…");
   setMeter(15);
 
-  const vision=await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
   );
 
-  setMeter(45);
+  setMeter(50);
 
-  poseLandmarker=await PoseLandmarker.createFromOptions(vision,{
-    baseOptions:{
-      modelAssetPath:POSE_MODEL,
-      delegate:'CPU'
+  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
+      delegate: "CPU"
     },
-    runningMode:'VIDEO',
-    numPoses:4,
-    minPoseDetectionConfidence:.25,
-    minPosePresenceConfidence:.25,
-    minTrackingConfidence:.25
+    runningMode: "VIDEO",
+    numPoses: 4,
+    minPoseDetectionConfidence: 0.25,
+    minPosePresenceConfidence: 0.25,
+    minTrackingConfidence: 0.25
   });
 
   setMeter(100);
-  status('modelStatus','AI pose model loaded. Body landmarks will be analyzed on this device.');
+  setStatus("modelStatus", "AI pose model loaded. Body landmarks will now be analyzed.");
 
   return poseLandmarker;
 }
 
-function insideROI(lm){
-  if(!box)return true;
+function poseInsideBox(landmarks){
+  if(!box) return false;
 
-  const [x,y,w,h]=box.map((v,i)=>
-    v/(i%2===0?canvas.width:canvas.height)
-  );
+  const [x,y,w,h] = box;
+  const torsoIds = [11,12,23,24];
 
-  const ids=[11,12,23,24];
-  let sx=0,sy=0,n=0;
+  let sx=0, sy=0, count=0;
 
-  for(const id of ids){
-    const p=lm[id];
-    if(p&&p.visibility>.15){
-      sx+=p.x;
-      sy+=p.y;
-      n++;
+  for(const id of torsoIds){
+    const p=landmarks[id];
+
+    if(p && (p.visibility ?? 0) > 0.15){
+      sx+=p.x*video.videoWidth;
+      sy+=p.y*video.videoHeight;
+      count++;
     }
   }
 
-  if(!n)return false;
+  if(!count) return false;
 
-  const cx=sx/n;
-  const cy=sy/n;
+  const cx=sx/count, cy=sy/count;
 
-  return cx>=x&&cx<=x+w&&cy>=y&&cy<=y+h;
+  return cx>=x && cx<=x+w && cy>=y && cy<=y+h;
 }
 
-function getPose(result){
-  if(!result?.landmarks?.length)return null;
+const TRACK = [11,12,13,14,15,16,23,24,25,26,27,28,29,30,31,32];
 
-  let best=null;
-  let bestScore=-1;
+function poseFeatures(landmarks){
+  if(!landmarks) return null;
 
-  for(const lm of result.landmarks){
-    if(!insideROI(lm))continue;
+  return TRACK.map(id => {
+    const p=landmarks[id];
 
-    const ids=[11,12,23,24];
-    let vis=0,n=0;
+    if(!p || (p.visibility ?? 0) < 0.12) return null;
 
-    for(const id of ids){
-      const p=lm[id];
-      if(p){
-        vis+=p.visibility??0;
-        n++;
-      }
-    }
-
-    const score=n?vis/n:0;
-
-    if(score>bestScore){
-      best=lm;
-      bestScore=score;
-    }
-  }
-
-  return bestScore>.15?best:null;
-}
-
-const TRACK=[
-  11,12,13,14,15,16,
-  23,24,25,26,27,28,29,30,31,32
-];
-
-function poseFeatures(lm){
-  if(!lm)return null;
-
-  const f=[];
-
-  for(const id of TRACK){
-    const p=lm[id];
-
-    if(!p||((p.visibility??0)<.12)){
-      f.push(null);
-      continue;
-    }
-
-    f.push([
-      p.x*canvas.width,
-      p.y*canvas.height
-    ]);
-  }
-
-  return f;
+    return [
+      p.x*video.videoWidth,
+      p.y*video.videoHeight
+    ];
+  });
 }
 
 function poseDelta(a,b){
-  if(!a||!b)return 0;
+  if(!a || !b) return 0;
 
-  let sum=0,n=0;
+  let sum=0, count=0;
+  const scale=Math.max(1, Math.hypot(box[2],box[3]));
 
   for(let i=0;i<a.length;i++){
-    if(!a[i]||!b[i])continue;
+    if(!a[i] || !b[i]) continue;
 
-    const dx=(a[i][0]-b[i][0])/Math.max(1,box[2]);
-    const dy=(a[i][1]-b[i][1])/Math.max(1,box[3]);
+    sum += Math.hypot(
+      a[i][0]-b[i][0],
+      a[i][1]-b[i][1]
+    ) / scale;
 
-    sum+=Math.hypot(dx,dy);
-    n++;
+    count++;
   }
 
-  return n?sum/n:0;
+  return count ? sum/count : 0;
 }
 
-function motionCrop(){
-  const [bx,by,bw,bh]=box.map(Math.round);
-  const w=80;
-  const h=Math.max(24,Math.round(80*bh/bw));
+function pixelSample(){
+  const [x,y,w,h]=box.map(Math.round);
 
-  const c=document.createElement('canvas');
-  c.width=w;
-  c.height=h;
+  const c=document.createElement("canvas");
+  c.width=96;
+  c.height=Math.max(24,Math.round(96*h/w));
 
-  const x=c.getContext('2d',{willReadFrequently:true});
+  const cctx=c.getContext("2d",{willReadFrequently:true});
 
-  x.drawImage(video,bx,by,bw,bh,0,0,w,h);
+  cctx.drawImage(video,x,y,w,h,0,0,c.width,c.height);
 
-  const d=x.getImageData(0,0,w,h).data;
-  const g=new Uint8Array(w*h);
+  const rgba=cctx.getImageData(0,0,c.width,c.height).data;
+  const gray=new Uint8Array(c.width*c.height);
 
-  for(let i=0;i<g.length;i++){
-    g[i]=(d[i*4]+d[i*4+1]+d[i*4+2])/3;
+  for(let i=0;i<gray.length;i++){
+    gray[i]=(rgba[i*4]+rgba[i*4+1]+rgba[i*4+2])/3;
   }
 
-  return g;
+  return gray;
 }
 
 function pixelDelta(a,b){
-  if(!a||!b)return 0;
+  if(!a || !b) return 0;
 
-  let n=0;
+  let changed=0;
 
   for(let i=0;i<a.length;i++){
-    if(Math.abs(a[i]-b[i])>25)n++;
+    if(Math.abs(a[i]-b[i])>25) changed++;
   }
 
-  return n/a.length;
+  return changed/a.length;
 }
 
-function makeRuns(samples,key,threshold,minCount){
-  const out=[];
+function runs(samples,key,threshold,minSamples){
+  const found=[];
   let start=-1,last=-1;
 
   for(let i=0;i<samples.length;i++){
     if(samples[i][key]>=threshold){
-      if(start<0)start=i;
+      if(start<0) start=i;
       last=i;
     }else if(start>=0){
-      if(last-start+1>=minCount){
-        out.push({
-          start:samples[start].t,
-          end:samples[last].t,
+      if(last-start+1>=minSamples){
+        found.push({
+          start:samples[start].time,
+          end:samples[last].time,
           source:key
         });
       }
@@ -443,50 +399,59 @@ function makeRuns(samples,key,threshold,minCount){
     }
   }
 
-  if(start>=0&&last-start+1>=minCount){
-    out.push({
-      start:samples[start].t,
-      end:samples[last].t,
+  if(start>=0 && last-start+1>=minSamples){
+    found.push({
+      start:samples[start].time,
+      end:samples[last].time,
       source:key
     });
   }
 
-  return out;
+  return found;
 }
 
-function mergeRuns(runs,gap){
-  runs.sort((a,b)=>a.start-b.start);
-  const out=[];
+function mergeRuns(items){
+  items.sort((a,b)=>a.start-b.start);
 
-  for(const r of runs){
-    const z=out.at(-1);
+  const merged=[];
 
-    if(z&&r.start-z.end<=gap){
-      z.end=Math.max(z.end,r.end);
-      z.sources.add(r.source);
+  for(const item of items){
+    const last=merged.at(-1);
+
+    if(last && item.start-last.end<=2.5){
+      last.end=Math.max(last.end,item.end);
+      last.sources.add(item.source);
     }else{
-      out.push({...r,sources:new Set([r.source])});
+      merged.push({
+        start:item.start,
+        end:item.end,
+        sources:new Set([item.source])
+      });
     }
   }
 
-  return out;
+  return merged;
+}
+
+function formatTime(t){
+  return `${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,"0")}`;
 }
 
 async function scan(){
-  if(busy)return;
+  if(busy) return;
 
-  if(!box||box[2]<12||box[3]<12){
-    alert('Draw a box around the pitcher first.');
+  if(!box || box[2]<12 || box[3]<12){
+    alert("Draw a box around Brayden first.");
     return;
   }
 
   busy=true;
-  $('scanBtn').disabled=$('rescanBtn').disabled=true;
-  $('progress').classList.remove('hidden');
-  $('exportStep').classList.add('hidden');
+  $("scanBtn").disabled=$("rescanBtn").disabled=true;
+  $("progress").classList.remove("hidden");
+
   video.pause();
 
-  const oldTime=video.currentTime;
+  const originalTime=video.currentTime;
 
   try{
     const ai=await loadAI();
@@ -494,169 +459,172 @@ async function scan(){
     const total=Math.ceil(duration/SAMPLE);
     const samples=[];
 
-    let prevPose=null;
-    let prevPixels=null;
-    let lastTimestamp=-1;
+    let previousPose=null;
+    let previousPixels=null;
+    let previousTimestamp=-1;
 
     for(let i=0;i<total;i++){
-      const t=Math.min(i*SAMPLE,Math.max(0,duration-.03));
+      const time=Math.min(i*SAMPLE,Math.max(0,duration-0.05));
 
-      await seek(t);
+      await seekTo(time);
 
       const timestamp=Math.max(
-        lastTimestamp+1,
-        Math.round(t*1000)
+        previousTimestamp+1,
+        Math.round(time*1000)
       );
 
-      lastTimestamp=timestamp;
+      previousTimestamp=timestamp;
 
-      let poseScore=0;
-      let pixelScore=0;
+      let pose=0, pixels=0;
 
       try{
         const result=ai.detectForVideo(video,timestamp);
-        const lm=getPose(result);
-        const feat=poseFeatures(lm);
+        let chosen=null;
 
-        poseScore=poseDelta(prevPose,feat);
-        prevPose=feat;
-      }catch(err){
-        console.warn('Pose inference frame failed',err);
+        for(const landmarks of (result.landmarks||[])){
+          if(poseInsideBox(landmarks)){
+            chosen=landmarks;
+            break;
+          }
+        }
+
+        const features=poseFeatures(chosen);
+        pose=poseDelta(previousPose,features);
+        previousPose=features;
+
+      }catch(error){
+        console.warn("Pose inference frame failed",error);
       }
 
       try{
-        const px=motionCrop();
-        pixelScore=pixelDelta(prevPixels,px);
-        prevPixels=px;
-      }catch(err){
-        console.warn('Motion backup frame failed',err);
+        const currentPixels=pixelSample();
+        pixels=pixelDelta(previousPixels,currentPixels);
+        previousPixels=currentPixels;
+
+      }catch(error){
+        console.warn("Pixel-motion sample failed",error);
       }
 
-      samples.push({
-        t,
-        pose:poseScore,
-        pixel:pixelScore
-      });
+      samples.push({time,pose,pixels});
 
       if(i%3===0){
-        $('progress').value=(i+1)/total*100;
+        $("progress").value=(i+1)/total*100;
 
-        status(
-          'scanStatus',
-          `AI analyzing ${fmt(t)} of ${fmt(duration)} · ${Math.round((i+1)/total*100)}%`
+        setStatus(
+          "scanStatus",
+          `Analyzing ${formatTime(time)} of ${formatTime(duration)} · ${Math.round((i+1)/total*100)}%`
         );
 
-        await new Promise(r=>setTimeout(r,0));
+        await wait(0);
       }
     }
 
     const poseRuns=[
-      ...makeRuns(samples,'pose',.035,2),
-      ...makeRuns(samples,'pose',.022,3)
+      ...runs(samples,"pose",0.025,2),
+      ...runs(samples,"pose",0.016,3)
     ];
 
-    const pixelRuns=makeRuns(samples,'pixel',.075,2);
-    const merged=mergeRuns([...poseRuns,...pixelRuns],2.5);
+    const motionRuns=runs(samples,"pixels",0.07,2);
 
-    candidates=merged.map(r=>({
-      start:Math.max(0,r.start-PRE),
-      end:Math.min(duration,r.end+POST),
+    candidates=mergeRuns([...poseRuns,...motionRuns]).map(item=>({
+      start:Math.max(0,item.start-PRE),
+      end:Math.min(duration,item.end+POST),
       source:
-        r.sources.has('pose')&&r.sources.has('pixel')
-        ?'AI + motion'
-        :r.sources.has('pose')
-        ?'AI pose'
-        :'Motion backup'
+        item.sources.has("pose") && item.sources.has("pixels")
+        ? "AI + motion"
+        : item.sources.has("pose")
+        ? "AI pose"
+        : "Motion backup"
     }));
 
-    selected=new Set(candidates.map((_,i)=>i));
+    selected=new Set(candidates.map((_,index)=>index));
 
     renderCandidates();
-    $('exportBtn').disabled=!candidates.length;
 
-    status(
-      'scanStatus',
+    setStatus(
+      "scanStatus",
       candidates.length
-      ?`Found ${candidates.length} candidate segments. ${poseRuns.length} pose-based activity windows and ${pixelRuns.length} motion-backup windows contributed. Review every candidate.`
-      :'No candidate windows were found. Try a larger box around the pitcher, or adjust the box more tightly around his body.'
+      ? `Found ${candidates.length} possible pitch segments. Review each candidate; labels show whether AI pose detection, motion backup, or both contributed.`
+      : "No candidates were detected. Try a larger box that includes Brayden’s entire body and throwing arm, then rescan."
     );
 
-  }catch(e){
-    status('scanStatus',`Scan failed: ${e?.message||e}`);
-    console.error(e);
+  }catch(error){
+    setStatus("scanStatus",`Scan failed: ${error.message || error}`);
+    console.error(error);
 
   }finally{
     busy=false;
-    $('scanBtn').disabled=$('rescanBtn').disabled=false;
-    $('progress').classList.add('hidden');
+    $("scanBtn").disabled=$("rescanBtn").disabled=false;
+    $("progress").classList.add("hidden");
     video.pause();
 
     try{
-      await seek(oldTime);
+      await seekTo(originalTime);
     }catch(_){}
   }
 }
 
 function renderCandidates(){
-  const list=$('clips');
+  const list=$("clips");
   list.replaceChildren();
 
-  candidates.forEach((c,i)=>{
-    const row=document.createElement('div');
-    row.className='clip';
+  candidates.forEach((candidate,index)=>{
+    const row=document.createElement("div");
+    row.className="clip";
 
-    const label=document.createElement('label');
-    label.style.display='flex';
-    label.style.gap='9px';
-    label.style.alignItems='center';
+    const label=document.createElement("label");
+    label.style.display="flex";
+    label.style.gap="9px";
+    label.style.alignItems="center";
 
-    const cb=document.createElement('input');
-    cb.type='checkbox';
-    cb.checked=selected.has(i);
+    const checkbox=document.createElement("input");
+    checkbox.type="checkbox";
+    checkbox.checked=selected.has(index);
 
-    cb.onchange=()=>cb.checked
-      ?selected.add(i)
-      :selected.delete(i);
+    checkbox.onchange=()=>checkbox.checked
+      ?selected.add(index)
+      :selected.delete(index);
 
-    const text=document.createElement('span');
+    const title=document.createElement("strong");
+    title.textContent=`Candidate ${index+1}`;
 
-    const title=document.createElement('b');
-    title.textContent=`Candidate ${i+1} `;
+    const times=document.createElement("span");
+    times.className="pill";
+    times.textContent=`${formatTime(candidate.start)}–${formatTime(candidate.end)}`;
 
-    const times=document.createElement('span');
-    times.className='pill';
-    times.textContent=`${fmt(c.start)}–${fmt(c.end)}`;
+    const source=document.createElement("span");
+    source.className=candidate.source==="AI pose"?"tag":"tag motion";
+    source.textContent=candidate.source;
 
-    const source=document.createElement('span');
-    source.className=c.source==='AI pose'?'tag':'tag motion';
-    source.textContent=c.source;
+    label.append(checkbox,title,times,source);
 
-    text.append(
-      title,
-      times,
-      document.createTextNode(' '),
-      source
-    );
-
-    label.append(cb,text);
-
-    const preview=document.createElement('button');
-    preview.className='secondary';
-    preview.textContent='Preview';
+    const preview=document.createElement("button");
+    preview.className="secondary";
+    preview.textContent="Preview";
 
     preview.onclick=async()=>{
-      video.pause();
-      await seek(c.start);
-      await video.play();
+      try{
+        await seekTo(candidate.start);
+        await video.play();
+
+      }catch(error){
+        setStatus("scanStatus",`Could not preview: ${error.message}`);
+        return;
+      }
 
       const stop=()=>{
-        if(video.currentTime>=c.end){
+        if(video.currentTime>=candidate.end){
           video.pause();
-          video.removeEventListener('timeupdate',stop);
+          video.removeEventListener("timeupdate",stop);
         }
       };
 
-      video.addEventListener('timeupdate',stop);
+      video.addEventListener("timeupdate",stop);
+
+      video.scrollIntoView({
+        behavior:"smooth",
+        block:"center"
+      });
     };
 
     row.append(label,preview);
@@ -664,179 +632,18 @@ function renderCandidates(){
   });
 }
 
-$('scanBtn').onclick=scan;
-$('rescanBtn').onclick=scan;
+$("scanBtn").onclick=scan;
+$("rescanBtn").onclick=scan;
 
-$('selectAllBtn').onclick=()=>{
+$("selectAllBtn").onclick=()=>{
   selected=new Set(candidates.map((_,i)=>i));
   renderCandidates();
 };
 
-$('selectNoneBtn').onclick=()=>{
+$("selectNoneBtn").onclick=()=>{
   selected.clear();
   renderCandidates();
 };
-
-async function exportVideo(){
-  const chosen=[...selected]
-    .sort((a,b)=>a-b)
-    .map(i=>candidates[i]);
-
-  if(!chosen.length)return;
-
-  const out=document.createElement('canvas');
-  out.width=video.videoWidth;
-  out.height=video.videoHeight;
-
-  const c=out.getContext('2d');
-  const stream=out.captureStream(30);
-
-  try{
-    const sourceStream=
-      video.captureStream?.()||
-      video.mozCaptureStream?.();
-
-    sourceStream?.getAudioTracks().forEach(
-      t=>stream.addTrack(t)
-    );
-
-  }catch(e){
-    console.warn('Audio capture unavailable',e);
-  }
-
-  const mime=[
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-    'video/mp4',
-    'video/webm;codecs=vp9,opus',
-    'video/webm'
-  ].find(t=>
-    window.MediaRecorder&&MediaRecorder.isTypeSupported(t)
-  );
-
-  $('exportStep').classList.remove('hidden');
-
-  if(!mime){
-    status(
-      'exportStatus',
-      'This browser does not support a compatible MediaRecorder format. Try current desktop Chrome or Safari.'
-    );
-    return;
-  }
-
-  $('exportBtn').disabled=true;
-  $('exportProgress').classList.remove('hidden');
-
-  status(
-    'exportStatus',
-    'Combining clips. Keep this page open and prevent your phone from sleeping.'
-  );
-
-  const recorder=new MediaRecorder(stream,{mimeType:mime});
-  const chunks=[];
-
-  recorder.ondataavailable=e=>{
-    if(e.data?.size)chunks.push(e.data);
-  };
-
-  const stopped=new Promise(resolve=>{
-    recorder.onstop=resolve;
-  });
-
-  recorder.start(1000);
-
-  let raf=0;
-
-  const paint=()=>{
-    if(video.readyState>=2){
-      c.drawImage(video,0,0,out.width,out.height);
-    }
-    raf=requestAnimationFrame(paint);
-  };
-
-  raf=requestAnimationFrame(paint);
-
-  try{
-    for(let i=0;i<chosen.length;i++){
-      const cl=chosen[i];
-
-      await seek(cl.start);
-
-      await new Promise((resolve,reject)=>{
-        let finished=false;
-
-        const end=()=>{
-          if(finished)return;
-          finished=true;
-          clearTimeout(watchdog);
-          video.pause();
-          video.removeEventListener('timeupdate',tick);
-          resolve();
-        };
-
-        const tick=()=>{
-          if(video.currentTime>=cl.end-.02)end();
-        };
-
-        const watchdog=setTimeout(()=>{
-          if(!finished){
-            finished=true;
-            video.pause();
-            video.removeEventListener('timeupdate',tick);
-            reject(Error('Playback timed out during export.'));
-          }
-        },Math.max(15000,(cl.end-cl.start)*4000));
-
-        video.addEventListener('timeupdate',tick);
-        video.play().catch(reject);
-      });
-
-      $('exportProgress').value=(i+1)/chosen.length*100;
-
-      status(
-        'exportStatus',
-        `Exporting segment ${i+1} of ${chosen.length}…`
-      );
-    }
-
-    cancelAnimationFrame(raf);
-    video.pause();
-    recorder.stop();
-    await stopped;
-
-    const blob=new Blob(chunks,{type:mime});
-
-    if(exportURL)URL.revokeObjectURL(exportURL);
-    exportURL=URL.createObjectURL(blob);
-
-    const ext=mime.includes('mp4')?'mp4':'webm';
-    const a=$('download');
-
-    a.href=exportURL;
-    a.download=`PitchCut_edited.${ext}`;
-    a.textContent=`Download edited video (${(blob.size/1048576).toFixed(1)} MB)`;
-    a.classList.remove('hidden');
-
-    status(
-      'exportStatus',
-      `Export created from ${chosen.length} selected segments. Download and review it before sharing.`
-    );
-
-  }catch(e){
-    try{
-      if(recorder.state!=='inactive')recorder.stop();
-    }catch(_){}
-
-    status('exportStatus',`Export failed: ${e?.message||e}`);
-
-  }finally{
-    cancelAnimationFrame(raf);
-    $('exportBtn').disabled=false;
-    stream.getTracks().forEach(t=>t.stop());
-    video.pause();
-  }
-}
-
-$('exportBtn').onclick=exportVideo;
 </script>
 </body>
 </html>
