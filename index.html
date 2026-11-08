@@ -1,279 +1,682 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>PitchCut</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; background: #0f1720; color: #e8eef5; }
-  header { padding: 14px 18px; background: #16212e; font-size: 22px; font-weight: 700; }
-  header span { color: #4cc2ff; }
-  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
-  .card { background: #16212e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-  button { background: #4cc2ff; color: #06202e; border: 0; border-radius: 8px; padding: 12px 16px;
-           font-size: 16px; font-weight: 600; margin: 4px; cursor: pointer; }
-  button.alt { background: #2a3b4e; color: #e8eef5; }
-  button.active { outline: 3px solid #fff; }
-  video { width: 100%; border-radius: 8px; background: #000; }
-  canvas { max-width: 100%; border-radius: 8px; touch-action: none; }
-  .hidden { display: none; }
-  label { display: block; margin-top: 10px; }
-  input[type=range] { width: 100%; }
-  progress { width: 100%; height: 18px; }
-  .small { font-size: 14px; color: #9fb3c8; }
+:root {
+  color-scheme: dark;
+  --bg:#0c1420;
+  --panel:#152235;
+  --muted:#a9bbcf;
+  --accent:#55c6ff;
+  --line:#2a3d55
+}
+* { box-sizing:border-box }
+body {
+  margin:0;
+  background:var(--bg);
+  color:#eef5fc;
+  font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif
+}
+header {
+  padding:16px 18px;
+  background:#111e2e;
+  border-bottom:1px solid var(--line);
+  font-size:22px;
+  font-weight:800
+}
+header span { color:var(--accent) }
+main { max-width:900px; margin:auto; padding:16px }
+.card {
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:14px
+}
+h2 { font-size:18px; margin:0 0 10px }
+p { color:var(--muted) }
+button {
+  border:0;
+  border-radius:9px;
+  background:var(--accent);
+  color:#062033;
+  font-weight:750;
+  font-size:15px;
+  padding:12px 15px;
+  margin:4px 4px 4px 0;
+  cursor:pointer
+}
+button.secondary { background:#2b4059; color:#eef5fc }
+button:disabled { opacity:.45 }
+input[type=file] { max-width:100%; padding:8px 0 }
+input[type=range] { width:100% }
+video,canvas {
+  display:block;
+  width:100%;
+  max-height:55vh;
+  background:#000;
+  border-radius:10px;
+  margin-top:10px
+}
+canvas { touch-action:none; cursor:crosshair }
+.hidden { display:none!important }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+.status { margin-top:10px; overflow-wrap:anywhere }
+small,.small { font-size:13px; color:var(--muted) }
+progress { width:100%; height:18px; margin-top:10px }
+.clip {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 0;
+  border-top:1px solid var(--line);
+  flex-wrap:wrap
+}
+.pill {
+  font-size:12px;
+  background:#263d56;
+  padding:3px 8px;
+  border-radius:20px
+}
+a { color:var(--accent); font-weight:700 }
 </style>
 </head>
+
 <body>
 <header>Pitch<span>Cut</span></header>
-<div class="wrap">
 
-  <div class="card">
-    <h3>1. Choose your video</h3>
-    <input type="file" id="file" accept="video/*">
-    <div id="loadMsg"></div>
-  </div>
+<main>
 
-  <div class="card hidden" id="step2">
-    <h3>2. Drag a box around the pitcher only</h3>
-    <div class="small">Draw it tight: from above his head to just below his feet. Leave out the catcher.</div>
-    <canvas id="cv"></canvas>
-    <label>Sensitivity (higher catches more, including extras)
-      <input type="range" id="sens" min="1" max="10" value="7">
-    </label>
-    <button onclick="findPitches()">Find pitches</button>
-    <progress id="prog" value="0" max="1" class="hidden"></progress>
-    <div id="msg"></div>
-  </div>
-
-  <div class="card hidden" id="step3">
-    <h3>3. Review pitches</h3>
-    <video id="player" controls playsinline muted></video>
-    <div>
-      <strong>Speed:</strong>
-      <button class="alt spd" data-s="1">1x</button>
-      <button class="alt spd" data-s="0.5">0.5x</button>
-      <button class="alt spd" data-s="0.25">0.25x</button>
-      <button class="alt spd" data-s="0.125">0.125x</button>
-    </div>
-    <div>
-      <button class="alt" onclick="stepFrame(-1)">&laquo; Frame</button>
-      <button class="alt" onclick="skip(-1)">Back 1s</button>
-      <button onclick="togglePlay()">Play / Pause</button>
-      <button class="alt" onclick="skip(1)">Forward 1s</button>
-      <button class="alt" onclick="stepFrame(1)">Frame &raquo;</button>
-    </div>
-    <div>
-      <button class="alt" onclick="gotoClip(cur - 1)">Previous pitch</button>
-      <button class="alt" id="loopBtn" onclick="toggleLoop()">Loop: off</button>
-      <button class="alt" id="reelBtn" onclick="toggleReel()">Play all: off</button>
-      <button class="alt" onclick="gotoClip(cur + 1)">Next pitch</button>
-    </div>
-    <h4 id="count">All pitches</h4>
-    <div id="clipList"></div>
-  </div>
+<section class="card">
+<h2>1. Choose a video</h2>
+<input id="file" type="file" accept="video/*">
+<div id="loadStatus" class="status">
+Your video stays on this device; it is not uploaded to a server.
 </div>
+<video id="source" controls playsinline class="hidden"></video>
+</section>
+
+<section id="roiStep" class="card hidden">
+<h2>2. Mark the pitcher</h2>
+<p>
+Drag a box around the pitcher only. Include his full body and throwing arm;
+exclude the catcher where possible.
+</p>
+<canvas id="roiCanvas"></canvas>
+<div class="row">
+<button id="scanBtn" disabled>Scan for pitch candidates</button>
+<button id="clearBox" class="secondary">Clear box</button>
+</div>
+<label>
+Sensitivity: <b id="sensLabel">7</b>/10 —
+higher keeps more possible movements
+</label>
+<input id="sensitivity" type="range" min="1" max="10" value="7">
+<p class="small">
+This is conservative visual-motion detection, not a trained baseball AI model.
+It favors extra candidates over silently discarding possible pitches.
+</p>
+</section>
+
+<section id="reviewStep" class="card hidden">
+<h2>3. Review candidates</h2>
+<div id="scanStatus" class="status"></div>
+<progress id="progress" class="hidden" max="100" value="0"></progress>
+<div class="row">
+<button id="rescanBtn" class="secondary">Rescan</button>
+<button id="exportBtn" disabled>Export selected clips</button>
+<button id="selectAllBtn" class="secondary">Select all</button>
+<button id="selectNoneBtn" class="secondary">Select none</button>
+</div>
+<p class="small">
+Each candidate includes 2 seconds before detected movement and 1 second after.
+Review candidates before exporting; false positives are safer than missed pitches.
+</p>
+<div id="clips"></div>
+</section>
+
+<section id="exportStep" class="card hidden">
+<h2>4. Export</h2>
+<div id="exportStatus" class="status">
+Select clips, then export.
+</div>
+<progress id="exportProgress" class="hidden" max="100" value="0"></progress>
+<a id="download" class="hidden" download="PitchCut_highlights.mp4">
+Download PitchCut video
+</a>
+<p class="small">
+Export depends on browser recording support. If your browser cannot create
+a video file, the app will report that instead of claiming the export succeeded.
+</p>
+</section>
+
+</main>
 
 <script>
-// ---- Settings you can change ----
-const PRE = 2.0;          // seconds kept before the pitch starts
-const POST = 1.0;         // seconds kept after the last motion of the pitch
-const LOCKOUT = 8.0;      // seconds to ignore motion after a pitch (covers the return throw)
-const GROUP_GAP = 1.5;    // motion closer together than this counts as one pitch
-const FPS = 30;
-// ---------------------------------
-const fileInput = document.getElementById('file');
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-const player = document.getElementById('player');
-let url = null, box = null, dragStart = null;
-let clips = [], cur = 0, loop = false, reel = false;
+(()=>{
+const $=id=>document.getElementById(id),
+fileInput=$('file'),
+video=$('source'),
+canvas=$('roiCanvas'),
+ctx=canvas.getContext('2d',{willReadFrequently:true});
 
-function makeVideo(src) {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement('video');
-    v.muted = true;
-    v.playsInline = true;
-    v.setAttribute('playsinline', '');
-    v.setAttribute('webkit-playsinline', '');
-    v.preload = 'auto';
-    v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
-    document.body.appendChild(v);
-    let finished = false;
-    const ok = () => { if (finished) return; finished = true; try { v.pause(); } catch (e) {} resolve(v); };
-    v.addEventListener('loadeddata', ok, { once: true });
-    v.addEventListener('canplay', ok, { once: true });
-    v.addEventListener('error', () => { if (!finished) { finished = true; reject(new Error('This video could not be opened.')); } }, { once: true });
-    v.src = src;
-    v.load();
-    const p = v.play();
-    if (p && p.catch) p.catch(() => {});
-    setTimeout(() => { if (!finished) { finished = true; reject(new Error('Timed out loading the video.')); } }, 30000);
+let fileURL=null,
+exportURL=null,
+firstFrame=null,
+box=null,
+drag=null,
+candidates=[],
+selected=new Set(),
+busy=false;
+
+const PRE=2,
+POST=1,
+STEP=.25,
+MERGE_GAP=2.2,
+MIN_RUN=2,
+fmt=t=>`${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
+
+function status(id,s) {
+  $(id).textContent=s;
+}
+
+function seek(t) {
+  return new Promise((resolve,reject)=>{
+    if(Math.abs(video.currentTime-t)<.015) return resolve();
+
+    let done=false;
+
+    const finish=ok=>{
+      if(done)return;
+      done=true;
+      clearTimeout(timer);
+      video.removeEventListener('seeked',okFn);
+      video.removeEventListener('error',errFn);
+      ok?resolve():reject(Error('Video seek failed.'));
+    };
+
+    const okFn=()=>finish(true);
+    const errFn=()=>finish(false);
+    const timer=setTimeout(()=>finish(true),2500);
+
+    video.addEventListener('seeked',okFn,{once:true});
+    video.addEventListener('error',errFn,{once:true});
+
+    video.currentTime=Math.min(
+      Math.max(0,t),
+      Math.max(0,video.duration-.02)
+    );
   });
 }
 
-function seek(v, t) {
-  return new Promise(res => {
-    let done = false;
-    const fin = () => { if (!done) { done = true; v.removeEventListener('seeked', fin); res(); } };
-    v.addEventListener('seeked', fin);
-    v.currentTime = t;
-    setTimeout(fin, 3000);
-  });
-}
+fileInput.onchange=async()=>{
+  const f=fileInput.files?.[0];
+  if(!f)return;
 
-fileInput.onchange = async () => {
-  const f = fileInput.files[0]; if (!f) return;
-  const msg = document.getElementById('loadMsg');
-  msg.textContent = 'Loading video...';
+  if(fileURL)URL.revokeObjectURL(fileURL);
+  if(exportURL)URL.revokeObjectURL(exportURL);
+
+  fileURL=URL.createObjectURL(f);
+  video.src=fileURL;
+  video.classList.remove('hidden');
+
+  status('loadStatus',`Loading ${f.name}…`);
+
   try {
-    if (url) URL.revokeObjectURL(url);
-    url = URL.createObjectURL(f);
-    const v = await makeVideo(url);
-    await seek(v, 0.1);
-    cv.width = v.videoWidth; cv.height = v.videoHeight;
-    ctx.drawImage(v, 0, 0);
-    window.firstFrame = ctx.getImageData(0, 0, cv.width, cv.height);
-    v.remove();
-    msg.textContent = 'Video loaded.';
-    document.getElementById('step2').classList.remove('hidden');
-    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
-  } catch (e) {
-    msg.textContent = 'Problem: ' + e.message;
+    await new Promise((r,j)=>{
+      video.onloadedmetadata=r;
+      video.onerror=()=>j(Error('This video format could not be opened.'));
+    });
+
+    await seek(.1);
+
+    canvas.width=video.videoWidth;
+    canvas.height=video.videoHeight;
+
+    ctx.drawImage(video,0,0);
+
+    firstFrame=ctx.getImageData(
+      0,0,canvas.width,canvas.height
+    );
+
+    box=null;
+    draw();
+
+    $('roiStep').classList.remove('hidden');
+    $('reviewStep').classList.add('hidden');
+    $('exportStep').classList.add('hidden');
+    $('scanBtn').disabled=false;
+
+    status(
+      'loadStatus',
+      `Loaded ${video.duration.toFixed(1)} sec • ${video.videoWidth}×${video.videoHeight}`
+    );
+
+  } catch(e) {
+    status('loadStatus',e.message);
   }
 };
 
-function redraw() {
-  ctx.putImageData(window.firstFrame, 0, 0);
-  if (box) { ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = Math.max(3, cv.width / 300); ctx.strokeRect(...box); }
-}
-function pos(e) {
-  const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e;
-  return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
-}
-function down(e) { e.preventDefault(); dragStart = pos(e); }
-function move(e) {
-  if (!dragStart) return; e.preventDefault();
-  const p = pos(e);
-  box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]),
-         Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
-  redraw();
-}
-function up() { dragStart = null; }
-['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
-['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
-['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
+function draw() {
+  if(!firstFrame)return;
 
-async function findPitches() {
-  if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
-  const sens = parseInt(document.getElementById('sens').value);
-  const threshold = 0.10 - sens * 0.007;   // fraction of changed pixels in the box
-  const minRun = 3;                         // samples in a row above threshold (about 0.3 seconds)
-  const STEP = 1 / 10;                      // sample 10 times per second
-  const msg = document.getElementById('msg');
-  const prog = document.getElementById('prog');
+  ctx.putImageData(firstFrame,0,0);
 
-  msg.textContent = 'Preparing...';
-  let v;
-  try { v = await makeVideo(url); } catch (e) { msg.textContent = 'Problem: ' + e.message; return; }
-  const dur = v.duration;
-  const [bx, by, bw, bh] = box.map(Math.round);
-  const W = 160, H = Math.max(1, Math.round(160 * bh / bw));
-  const small = document.createElement('canvas'); small.width = W; small.height = H;
-  const sctx = small.getContext('2d', { willReadFrequently: true });
-
-  prog.classList.remove('hidden'); prog.max = dur;
-
-  // Pass 1: record how much changed in the box at every sample
-  const times = [], levels = [];
-  let prev = null;
-  for (let t = 0; t < dur; t += STEP) {
-    await seek(v, t);
-    sctx.drawImage(v, bx, by, bw, bh, 0, 0, W, H);
-    const d = sctx.getImageData(0, 0, W, H).data;
-    const gray = new Uint8Array(W * H);
-    for (let i = 0; i < gray.length; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
-    let level = 0;
-    if (prev) {
-      let changed = 0;
-      for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) changed++;
-      level = changed / gray.length;
-    }
-    times.push(t); levels.push(level);
-    prev = gray;
-    prog.value = t;
-    msg.textContent = `Scanning... ${Math.round(t / dur * 100)}%  (keep this screen open)`;
+  if(box) {
+    ctx.strokeStyle='#55c6ff';
+    ctx.lineWidth=Math.max(3,canvas.width/300);
+    ctx.strokeRect(...box);
   }
-  v.remove();
+}
 
-  // Pass 2: find stretches of sustained motion, with a lockout after each pitch
-  const pitches = [];   // {start, end} of the motion itself
-  let i = 0;
-  while (i < times.length) {
-    if (levels[i] > threshold) {
-      let j = i;
-      while (j < times.length && levels[j] > threshold) j++;
-      const runLen = j - i;
-      if (runLen >= minRun) {
-        const last = pitches[pitches.length - 1];
-        if (last && times[i] - last.end <= GROUP_GAP) {
-          last.end = times[j - 1];                 // same pitch, extend it
-        } else if (!last || times[i] - last.end >= LOCKOUT) {
-          pitches.push({ start: times[i], end: times[j - 1] });
-        }                                          // else: inside the lockout, ignore
+function point(e) {
+  const r=canvas.getBoundingClientRect();
+
+  return [
+    (e.clientX-r.left)*canvas.width/r.width,
+    (e.clientY-r.top)*canvas.height/r.height
+  ];
+}
+
+canvas.onpointerdown=e=>{
+  if(!firstFrame)return;
+
+  canvas.setPointerCapture(e.pointerId);
+  drag=point(e);
+  box=[...drag,0,0];
+  draw();
+};
+
+canvas.onpointermove=e=>{
+  if(!drag)return;
+
+  const p=point(e);
+
+  box=[
+    Math.min(drag[0],p[0]),
+    Math.min(drag[1],p[1]),
+    Math.abs(p[0]-drag[0]),
+    Math.abs(p[1]-drag[1])
+  ];
+
+  draw();
+};
+
+canvas.onpointerup=()=>drag=null;
+
+$('clearBox').onclick=()=>{
+  box=null;
+  draw();
+};
+
+$('sensitivity').oninput=()=>
+  $('sensLabel').textContent=$('sensitivity').value;
+
+function crop(bx,by,bw,bh) {
+  const w=96,
+  h=Math.max(24,Math.round(96*bh/bw)),
+  c=document.createElement('canvas');
+
+  c.width=w;
+  c.height=h;
+
+  const x=c.getContext('2d',{willReadFrequently:true});
+
+  x.drawImage(video,bx,by,bw,bh,0,0,w,h);
+
+  const d=x.getImageData(0,0,w,h).data,
+  g=new Uint8Array(w*h);
+
+  for(let i=0;i<g.length;i++) {
+    g[i]=(d[i*4]+d[i*4+1]+d[i*4+2])/3;
+  }
+
+  return g;
+}
+
+function difference(a,b) {
+  let n=0;
+
+  for(let i=0;i<a.length;i++) {
+    if(Math.abs(a[i]-b[i])>24)n++;
+  }
+
+  return n/a.length;
+}
+
+async function scan() {
+  if(busy)return;
+
+  if(!box||box[2]<12||box[3]<12) {
+    alert('Draw a box around the pitcher first.');
+    return;
+  }
+
+  busy=true;
+
+  $('scanBtn').disabled=$('rescanBtn').disabled=true;
+  $('reviewStep').classList.remove('hidden');
+  $('progress').classList.remove('hidden');
+
+  status('scanStatus','Preparing scan…');
+
+  const dur=video.duration,
+  [bx,by,bw,bh]=box.map(Math.round),
+  threshold=.13-Number($('sensitivity').value)*.008,
+  samples=[];
+
+  let prev=null,
+  oldTime=video.currentTime;
+
+  video.pause();
+
+  try {
+    const total=Math.ceil(dur/STEP);
+
+    for(let k=0;k<total;k++) {
+      const t=Math.min(k*STEP,Math.max(0,dur-.03));
+
+      await seek(t);
+
+      const g=crop(bx,by,bw,bh);
+
+      samples.push({
+        t,
+        score:prev?difference(prev,g):0
+      });
+
+      prev=g;
+
+      if(k%4===0) {
+        $('progress').value=(k+1)/total*100;
+
+        status(
+          'scanStatus',
+          `Scanning ${fmt(t)} of ${fmt(dur)} — ${Math.round((k+1)/total*100)}%`
+        );
+
+        await new Promise(r=>setTimeout(r,0));
       }
-      i = j;
-    } else {
-      i++;
     }
+
+    function runs(th,min) {
+      const out=[];
+      let s=-1,last=-1;
+
+      for(let i=0;i<samples.length;i++) {
+        if(samples[i].score>=th) {
+          if(s<0)s=i;
+          last=i;
+        } else if(s>=0) {
+          if(last-s+1>=min) {
+            out.push({
+              start:samples[s].t,
+              end:samples[last].t
+            });
+          }
+          s=-1;
+        }
+      }
+
+      if(s>=0&&last-s+1>=min) {
+        out.push({
+          start:samples[s].t,
+          end:samples[last].t
+        });
+      }
+
+      return out;
+    }
+
+    const all=[
+      ...runs(threshold,MIN_RUN),
+      ...runs(threshold*.72,3)
+    ].sort((a,b)=>a.start-b.start);
+
+    const merged=[];
+
+    for(const r of all) {
+      const z=merged.at(-1);
+
+      if(z&&r.start-z.end<=MERGE_GAP) {
+        z.end=Math.max(z.end,r.end);
+      } else {
+        merged.push({...r});
+      }
+    }
+
+    candidates=merged.map(r=>({
+      start:Math.max(0,r.start-PRE),
+      end:Math.min(dur,r.end+POST)
+    }));
+
+    selected=new Set(candidates.map((_,i)=>i));
+
+    render();
+
+    status(
+      'scanStatus',
+      `Found ${candidates.length} candidate motion segments. This is not a verified pitch count. Review the candidates before exporting.`
+    );
+
+    $('exportBtn').disabled=!candidates.length;
+
+  } catch(e) {
+    status('scanStatus',`Scan stopped: ${e.message}`);
+  } finally {
+    busy=false;
+    $('scanBtn').disabled=$('rescanBtn').disabled=false;
+    $('progress').classList.add('hidden');
+    video.pause();
+    await seek(oldTime);
   }
-
-  clips = pitches.map(p => ({
-    start: Math.max(0, p.start - PRE),
-    end: Math.min(dur, p.end + POST)
-  }));
-
-  msg.textContent = `Done. Found ${clips.length} pitches.`;
-  prog.classList.add('hidden');
-  showClips();
 }
 
-function showClips() {
-  document.getElementById('step3').classList.remove('hidden');
-  document.getElementById('count').textContent = `${clips.length} pitches found`;
-  const list = document.getElementById('clipList'); list.innerHTML = '';
-  clips.forEach((c, i) => {
-    const b = document.createElement('button'); b.className = 'alt';
-    b.textContent = `Pitch ${i + 1}  (${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s)`;
-    b.onclick = () => gotoClip(i); list.appendChild(b);
+function render() {
+  const list=$('clips');
+  list.innerHTML='';
+
+  candidates.forEach((c,i)=>{
+    const row=document.createElement('div');
+    row.className='clip';
+
+    const label=document.createElement('label');
+    label.style.display='flex';
+    label.style.gap='9px';
+    label.style.alignItems='center';
+
+    const cb=document.createElement('input');
+    cb.type='checkbox';
+    cb.checked=selected.has(i);
+
+    cb.onchange=()=>{
+      cb.checked?selected.add(i):selected.delete(i);
+    };
+
+    const span=document.createElement('span');
+
+    span.innerHTML=`
+      <b>Candidate ${i+1}</b>
+      <span class="pill">${fmt(c.start)}–${fmt(c.end)}</span>
+    `;
+
+    label.append(cb,span);
+
+    const b=document.createElement('button');
+    b.className='secondary';
+    b.textContent='Preview';
+
+    b.onclick=async()=>{
+      video.pause();
+      await seek(c.start);
+      video.play();
+
+      const stop=()=>{
+        if(video.currentTime>=c.end) {
+          video.pause();
+          video.removeEventListener('timeupdate',stop);
+        }
+      };
+
+      video.addEventListener('timeupdate',stop);
+    };
+
+    row.append(label,b);
+    list.append(row);
   });
-  player.src = url;
-  player.onloadeddata = () => gotoClip(0);
-  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
 }
-function gotoClip(i) {
-  if (!clips.length) return;
-  cur = (i + clips.length) % clips.length;
-  player.currentTime = clips[cur].start;
-  player.play();
-}
-player.addEventListener('timeupdate', () => {
-  if (!clips.length) return;
-  const c = clips[cur];
-  if (player.currentTime >= c.end) {
-    if (loop) player.currentTime = c.start;
-    else if (reel) gotoClip(cur + 1);
-    else player.pause();
+
+$('scanBtn').onclick=scan;
+$('rescanBtn').onclick=scan;
+
+$('selectAllBtn').onclick=()=>{
+  selected=new Set(candidates.map((_,i)=>i));
+  render();
+};
+
+$('selectNoneBtn').onclick=()=>{
+  selected.clear();
+  render();
+};
+
+async function exportVideo() {
+  const chosen=[...selected]
+    .sort((a,b)=>a-b)
+    .map(i=>candidates[i]);
+
+  if(!chosen.length)return;
+
+  const out=document.createElement('canvas');
+
+  out.width=video.videoWidth;
+  out.height=video.videoHeight;
+
+  const c=out.getContext('2d'),
+  stream=out.captureStream(30);
+
+  try {
+    const vs=video.captureStream?.()||video.mozCaptureStream?.();
+
+    vs?.getAudioTracks().forEach(t=>stream.addTrack(t));
+  } catch(e) {}
+
+  const mime=[
+    'video/mp4;codecs=h264,aac',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm'
+  ].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
+
+  if(!mime) {
+    status(
+      'exportStatus',
+      'This browser does not support in-browser video export. Try a current desktop Chrome or Safari browser.'
+    );
+
+    $('exportStep').classList.remove('hidden');
+    return;
   }
-});
-document.querySelectorAll('.spd').forEach(b => b.onclick = () => {
-  player.playbackRate = parseFloat(b.dataset.s);
-  document.querySelectorAll('.spd').forEach(x => x.classList.remove('active'));
-  b.classList.add('active');
-});
-function togglePlay() { player.paused ? player.play() : player.pause(); }
-function skip(s) { player.currentTime = Math.max(0, player.currentTime + s); }
-function stepFrame(d) { player.pause(); player.currentTime = Math.max(0, player.currentTime + d / FPS); }
-function toggleLoop() { loop = !loop; document.getElementById('loopBtn').textContent = 'Loop: ' + (loop ? 'on' : 'off'); }
-function toggleReel() { reel = !reel; document.getElementById('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); }
+
+  $('exportStep').classList.remove('hidden');
+  $('exportProgress').classList.remove('hidden');
+  $('exportBtn').disabled=true;
+
+  status('exportStatus','Combining selected clips. Keep this page open.');
+
+  const recorder=new MediaRecorder(stream,{mimeType:mime}),
+  chunks=[];
+
+  recorder.ondataavailable=e=>{
+    if(e.data?.size)chunks.push(e.data);
+  };
+
+  const stopped=new Promise(r=>recorder.onstop=r);
+
+  recorder.start(1000);
+
+  try {
+    for(let i=0;i<chosen.length;i++) {
+      const cl=chosen[i];
+
+      await seek(cl.start);
+
+      await new Promise((resolve,reject)=>{
+        let done=false;
+
+        const finish=()=>{
+          if(done)return;
+          done=true;
+          video.pause();
+          video.removeEventListener('timeupdate',tick);
+          resolve();
+        };
+
+        const tick=()=>{
+          if(video.currentTime>=cl.end)finish();
+        };
+
+        video.addEventListener('timeupdate',tick);
+
+        video.play().then(()=>{
+          const paint=()=>{
+            if(done)return;
+            c.drawImage(video,0,0,out.width,out.height);
+            requestAnimationFrame(paint);
+          };
+
+          requestAnimationFrame(paint);
+        }).catch(reject);
+      });
+
+      $('exportProgress').value=(i+1)/chosen.length*100;
+
+      status(
+        'exportStatus',
+        `Exporting segment ${i+1} of ${chosen.length}…`
+      );
+    }
+
+    recorder.stop();
+    await stopped;
+
+    const blob=new Blob(chunks,{type:mime});
+
+    if(exportURL)URL.revokeObjectURL(exportURL);
+
+    exportURL=URL.createObjectURL(blob);
+
+    const a=$('download'),
+    ext=mime.includes('mp4')?'mp4':'webm';
+
+    a.href=exportURL;
+    a.download=`PitchCut_highlights.${ext}`;
+    a.textContent=`Download PitchCut video (${(blob.size/1048576).toFixed(1)} MB)`;
+    a.classList.remove('hidden');
+
+    status(
+      'exportStatus',
+      `Export ready: ${chosen.length} selected segments combined. Review the file before sharing.`
+    );
+
+  } catch(e) {
+    try { recorder.stop(); } catch(_) {}
+
+    status('exportStatus',`Export failed: ${e.message}`);
+
+  } finally {
+    $('exportBtn').disabled=false;
+    stream.getTracks().forEach(t=>t.stop());
+    video.pause();
+  }
+}
+
+$('exportBtn').onclick=exportVideo;
+
+})();
 </script>
 </body>
 </html>
