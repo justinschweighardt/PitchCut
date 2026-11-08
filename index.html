@@ -76,7 +76,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.7</div>
+  <div class="ver">v4.8</div>
 </header>
 
 <div class="wrap">
@@ -174,8 +174,6 @@
     <div id="peaks"></div>
   </div>
 </div>
-
-<script type="module">
 // ---------------- Settings you can change ----------------
 const PRE_RELEASE = 2.0;     // a clip starts at least this many seconds before the throw
 const WINDUP_LEAD = 1.0;     // and 1 second before the windup begins, whichever is earlier
@@ -190,6 +188,8 @@ const MERGE_WINDOW = 3.0;    // motion and AI hits this close together count as 
 const FPS = 30;
 const POSE_STEP = 1 / 15;    // AI scan samples per second
 const MOTION_STEP = 1 / 10;  // motion scan samples per second
+const WINDUP_CHECK = 2.0;    // a pitch needs motion in the pitcher box during this many seconds before it
+const WINDUP_MIN_MOTION = 0.6; // how much of the motion bar that windup motion must reach (higher = stricter)
 // ----------------------------------------------------------
 import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 
@@ -344,6 +344,17 @@ function findWindupStart(motion, release, threshold) {
   return Math.min(start, release - 0.8);   // a windup lasts at least 0.8 seconds
 }
 
+// Did the pitcher box show real movement in the seconds before this moment? (the windup)
+function hasWindup(motion, release, threshold) {
+  const { t, l } = motion;
+  const need = threshold * WINDUP_MIN_MOTION;
+  let hits = 0;
+  for (let k = 0; k < t.length; k++) {
+    if (t[k] >= release - WINDUP_CHECK && t[k] <= release && l[k] > need) hits++;
+  }
+  return hits >= 4;   // at least 0.4 seconds of movement before the throw
+}
+
 // ---------- Detector 2: AI pose (throwing arm speed) ----------
 async function getLandmarker(setMsg) {
   if (landmarker) return landmarker;
@@ -482,7 +493,7 @@ function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
   g.strokeStyle = '#3ddc84'; g.lineWidth = 3; g.fillStyle = '#3ddc84'; g.font = 'bold 16px sans-serif';
   kept.forEach((k, n) => { g.beginPath(); g.moveTo(X(k.time), top); g.lineTo(X(k.time), bot); g.stroke(); g.fillText(String(n + 1), X(k.time) + 4, top + 14); });
   txt += 'Moments considered (time, strength, seen by): ' + considered.map(m => m.time.toFixed(1) + 's, ' + m.score.toFixed(1) + ', ' + m.srcs.join('+')).join('  |  ') + '\n';
-  txt += 'Kept pitch moments: ' + kept.map(k => k.time.toFixed(1) + 's').join(', ');
+  txt += 'Kept pitch moments: ' + kept.map(k => k.time.toFixed(1) + 's').join(', ') + '\nPitches with no windup are dropped (needs motion in the box during the ' + WINDUP_CHECK + ' seconds before the throw).';
   $('peaks').textContent = txt;
 }
 
@@ -528,10 +539,14 @@ async function findPitches() {
   const cands = [];
   if (motion) cands.push(...motionEvents(motion, threshold));
   if (pose) cands.push(...poseEvents(pose, bar));
-  const { kept, considered } = combine(cands, strict, !!(motion && pose));
+  const combined = combine(cands, strict, !!(motion && pose));
+  const considered = combined.considered;
+  // a real pitch has a windup: motion building in the box just before the throw. A catcher's return throw does not.
+  const kept = motion ? combined.kept.filter(k => hasWindup(motion, k.time, threshold)) : combined.kept;
+  const dropped = combined.kept.length - kept.length;
   clips = kept.map(k => makeClip(k.time, findWindupStart(motion, k.time, threshold), k.srcs));
   drawDebug(dur, motion, pose, bar, threshold, kept, considered, pose ? pose.seen : 0);
-  $('msg').textContent = `Done. Found ${clips.length} pitches. Use the buttons under the video to add, remove or nudge clips, then make your highlight reel.` + note;
+  $('msg').textContent = `Done. Found ${clips.length} pitches.` + (dropped ? ` (Dropped ${dropped} with no windup, like a catcher's throw back.)` : '') + ' Use the buttons under the video to add, remove or nudge clips, then make your highlight reel.' + note;
   $('prog').classList.add('hidden');
   showClips(true);
 }
@@ -709,3 +724,4 @@ window.saveReel = async () => {
 </script>
 </body>
 </html>
+<script type="module">
