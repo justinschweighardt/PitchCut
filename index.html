@@ -1,649 +1,279 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#101a29">
-<title>PitchCut AI — Pitch Candidate Finder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PitchCut</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1320;--panel:#142238;--muted:#a9bbcf;--accent:#59c7ff;--line:#2a405b;--good:#79d6a1;--warn:#ffd27a}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:#eef5fc;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
-header{padding:16px 18px;background:#111e30;border-bottom:1px solid var(--line);font-size:22px;font-weight:850}
-header span{color:var(--accent)}
-main{max-width:960px;margin:auto;padding:15px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;margin:0 0 14px}
-h2{font-size:18px;margin:0 0 9px}
-p{color:var(--muted);margin:8px 0}
-button{border:0;border-radius:9px;background:var(--accent);color:#062033;font-weight:750;font-size:15px;padding:12px 15px;margin:4px 4px 4px 0;cursor:pointer}
-button.secondary{background:#2b4059;color:#eef5fc}
-button:disabled{opacity:.45}
-input[type=file]{max-width:100%;padding:8px 0}
-video{display:block;width:100%;max-height:58vh;background:#000;border-radius:10px}
-.preview{position:relative;width:100%;background:#000;border-radius:10px;overflow:hidden;margin-top:10px}
-.preview video{width:100%;height:auto;max-height:58vh;object-fit:contain}
-#overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none;pointer-events:auto}
-.status{margin-top:10px;overflow-wrap:anywhere}
-.small,small{font-size:13px;color:var(--muted)}
-progress{width:100%;height:18px;margin-top:10px}
-.clip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
-.pill{font-size:12px;background:#263d56;padding:3px 8px;border-radius:20px}
-.tag{font-size:12px;color:#062033;background:var(--good);padding:3px 8px;border-radius:20px}
-.tag.motion{background:var(--warn)}
-a{color:var(--accent);font-weight:750}
-.notice{border-left:3px solid var(--warn);padding:8px 11px;background:#202b39;border-radius:5px;color:#e7edf5}
-.meter{height:8px;background:#26384e;border-radius:8px;overflow:hidden}
-.meter>div{height:100%;width:0;background:var(--accent)}
-.hidden{display:none!important}
+  body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; background: #0f1720; color: #e8eef5; }
+  header { padding: 14px 18px; background: #16212e; font-size: 22px; font-weight: 700; }
+  header span { color: #4cc2ff; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
+  .card { background: #16212e; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  button { background: #4cc2ff; color: #06202e; border: 0; border-radius: 8px; padding: 12px 16px;
+           font-size: 16px; font-weight: 600; margin: 4px; cursor: pointer; }
+  button.alt { background: #2a3b4e; color: #e8eef5; }
+  button.active { outline: 3px solid #fff; }
+  video { width: 100%; border-radius: 8px; background: #000; }
+  canvas { max-width: 100%; border-radius: 8px; touch-action: none; }
+  .hidden { display: none; }
+  label { display: block; margin-top: 10px; }
+  input[type=range] { width: 100%; }
+  progress { width: 100%; height: 18px; }
+  .small { font-size: 14px; color: #9fb3c8; }
 </style>
 </head>
 <body>
-<header>Pitch<span>Cut</span> <small>AI-assisted pitch finder</small></header>
-<main>
+<header>Pitch<span>Cut</span> <span class="small">v3.1</span></header>
+<div class="wrap">
 
-<section class="card">
-<h2>1. Choose Brayden’s video</h2>
-<input id="file" type="file" accept="video/*">
-<div id="loadStatus" class="status">Choose a video from Photos or Files. The video is analyzed locally in this browser.</div>
-</section>
+  <div class="card">
+    <h3>1. Choose your video</h3>
+    <input type="file" id="file" accept="video/*">
+    <div id="loadMsg"></div>
+  </div>
 
-<section id="selectStep" class="card hidden">
-<h2>2. Show the pitcher and mark his area</h2>
-<p>Use the visible video below. Press play, then pause on a clear frame. The blue selection layer is transparent and sits directly over the video—there is no separate black preview box.</p>
-<div class="preview">
-  <video id="source" controls playsinline webkit-playsinline preload="auto"></video>
-  <canvas id="overlay"></canvas>
+  <div class="card hidden" id="step2">
+    <h3>2. Drag a box around the pitcher only</h3>
+    <div class="small">Draw it tight: from above his head to just below his feet. Leave out the catcher.</div>
+    <canvas id="cv"></canvas>
+    <label>Sensitivity (higher catches more, including extras)
+      <input type="range" id="sens" min="1" max="10" value="7">
+    </label>
+    <button onclick="findPitches()">Find pitches</button>
+    <progress id="prog" value="0" max="1" class="hidden"></progress>
+    <div id="msg"></div>
+  </div>
+
+  <div class="card hidden" id="step3">
+    <h3>3. Review pitches</h3>
+    <video id="player" controls playsinline muted></video>
+    <div>
+      <strong>Speed:</strong>
+      <button class="alt spd" data-s="1">1x</button>
+      <button class="alt spd" data-s="0.5">0.5x</button>
+      <button class="alt spd" data-s="0.25">0.25x</button>
+      <button class="alt spd" data-s="0.125">0.125x</button>
+    </div>
+    <div>
+      <button class="alt" onclick="stepFrame(-1)">&laquo; Frame</button>
+      <button class="alt" onclick="skip(-1)">Back 1s</button>
+      <button onclick="togglePlay()">Play / Pause</button>
+      <button class="alt" onclick="skip(1)">Forward 1s</button>
+      <button class="alt" onclick="stepFrame(1)">Frame &raquo;</button>
+    </div>
+    <div>
+      <button class="alt" onclick="gotoClip(cur - 1)">Previous pitch</button>
+      <button class="alt" id="loopBtn" onclick="toggleLoop()">Loop: off</button>
+      <button class="alt" id="reelBtn" onclick="toggleReel()">Play all: off</button>
+      <button class="alt" onclick="gotoClip(cur + 1)">Next pitch</button>
+    </div>
+    <h4 id="count">All pitches</h4>
+    <div id="clipList"></div>
+  </div>
 </div>
-<div class="row">
-<button id="playBtn" class="secondary">Play / Pause video</button>
-<button id="clearBox" class="secondary">Clear box</button>
-<button id="scanBtn" disabled>Run AI pitch scan</button>
-</div>
-<p id="boxStatus" class="small">After pausing on a clear frame, drag a box around Brayden’s full body and throwing arm.</p>
-<p class="small">If the video preview itself remains black, tap the video’s play control once and wait for a picture to appear. The selection layer does not capture or copy a video frame.</p>
-</section>
 
-<section id="scanStep" class="card hidden">
-<h2>3. AI analysis</h2>
-<div id="modelStatus" class="status">AI model has not loaded yet.</div>
-<div class="meter"><div id="modelMeter"></div></div>
-<div id="scanStatus" class="status"></div>
-<progress id="progress" class="hidden" max="100" value="0"></progress>
-<div class="row">
-<button id="rescanBtn" class="secondary">Rescan video</button>
-<button id="selectAllBtn" class="secondary">Select all</button>
-<button id="selectNoneBtn" class="secondary">Select none</button>
-</div>
-<p class="small">Each candidate includes 2 seconds before detected movement and 1 second after. Review the list; uncertain candidates are retained rather than silently discarded.</p>
-<div id="clips"></div>
-</section>
+<script>
+// ---- Settings you can change ----
+const PRE = 1.0;          // seconds kept before the first big motion (the windup)
+const CLIP_LEN = 5.0;     // seconds kept after the first big motion (windup + throw + 1 second after the catch)
+const LOCKOUT = 8.0;      // seconds to ignore motion after a pitch (covers the return throw)
+const GROUP_GAP = 1.5;    // motion closer together than this counts as one pitch
+const FPS = 30;
+// ---------------------------------
+const fileInput = document.getElementById('file');
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const player = document.getElementById('player');
+let url = null, box = null, dragStart = null;
+let clips = [], cur = 0, loop = false, reel = false;
 
-<section class="card">
-<h2>What the AI does—and does not do</h2>
-<p>PitchCut loads Google MediaPipe Pose Landmarker, a machine-learning model that estimates body landmarks. PitchCut then applies rule-based movement thresholds to identify possible pitching sequences. Pixel-motion detection runs as a backup.</p>
-<p class="notice">This is AI-assisted candidate detection, not a baseball-specific model trained on labeled pitching footage. It can miss pitches or flag other movements. Review the candidates before relying on them.</p>
-<p class="small">Video processing runs in your browser. The MediaPipe code and model are downloaded from Google-hosted public files when the scan starts. Keep Safari open and prevent the phone from sleeping during analysis.</p>
-</section>
-</main>
-
-<script type="module">
-import {FilesetResolver, PoseLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
-
-const $ = id => document.getElementById(id);
-const video = $("source");
-const overlay = $("overlay");
-const octx = overlay.getContext("2d");
-const PRE = 2, POST = 1, SAMPLE = 0.25;
-let fileURL = null, poseLandmarker = null, box = null, dragStart = null;
-let candidates = [], selected = new Set(), busy = false;
-
-function setStatus(id, message){ $(id).textContent = message; }
-function setMeter(value){ $("modelMeter").style.width = `${value}%`; }
-function wait(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
-
-function syncOverlaySize(){
-  if(!video.videoWidth || !video.videoHeight) return;
-  overlay.width = video.videoWidth;
-  overlay.height = video.videoHeight;
-  drawBox();
-}
-
-function drawBox(){
-  octx.clearRect(0, 0, overlay.width, overlay.height);
-  if(!box) return;
-  octx.strokeStyle = "#59c7ff";
-  octx.lineWidth = Math.max(5, overlay.width / 350);
-  octx.fillStyle = "rgba(89,199,255,.10)";
-  octx.fillRect(...box);
-  octx.strokeRect(...box);
-}
-
-function pointerPosition(event){
-  const rect = overlay.getBoundingClientRect();
-  return [
-    (event.clientX - rect.left) * overlay.width / rect.width,
-    (event.clientY - rect.top) * overlay.height / rect.height
-  ];
-}
-
-overlay.addEventListener("pointerdown", event => {
-  if(!video.videoWidth) return;
-  event.preventDefault();
-  overlay.setPointerCapture(event.pointerId);
-  dragStart = pointerPosition(event);
-  box = [dragStart[0], dragStart[1], 0, 0];
-  drawBox();
-});
-
-overlay.addEventListener("pointermove", event => {
-  if(!dragStart) return;
-  event.preventDefault();
-  const p = pointerPosition(event);
-  box = [
-    Math.min(dragStart[0], p[0]),
-    Math.min(dragStart[1], p[1]),
-    Math.abs(p[0] - dragStart[0]),
-    Math.abs(p[1] - dragStart[1])
-  ];
-  drawBox();
-});
-
-function endDrag(){ dragStart = null; }
-overlay.addEventListener("pointerup", endDrag);
-overlay.addEventListener("pointercancel", endDrag);
-
-function seekTo(time){
+function makeVideo(src) {
   return new Promise((resolve, reject) => {
-    const target = Math.max(0, Math.min(time, Math.max(0, video.duration - 0.04)));
-    if(Math.abs(video.currentTime - target) < 0.02 && video.readyState >= 2){
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-      return;
-    }
-
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute('playsinline', '');
+    v.setAttribute('webkit-playsinline', '');
+    v.preload = 'auto';
+    v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(v);
     let finished = false;
-
-    const cleanup = () => {
-      video.removeEventListener("seeked", onSeeked);
-      video.removeEventListener("error", onError);
-      clearTimeout(timer);
-    };
-
-    const done = () => {
-      if(finished) return;
-      finished = true;
-      cleanup();
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
-    };
-
-    const onSeeked = () => done();
-
-    const onError = () => {
-      if(finished) return;
-      finished = true;
-      cleanup();
-      reject(new Error("The browser could not seek to that video frame."));
-    };
-
-    const timer = setTimeout(() => {
-      if(video.readyState >= 2) done();
-      else onError();
-    }, 7000);
-
-    video.addEventListener("seeked", onSeeked, {once:true});
-    video.addEventListener("error", onError, {once:true});
-    video.currentTime = target;
+    const ok = () => { if (finished) return; finished = true; try { v.pause(); } catch (e) {} resolve(v); };
+    v.addEventListener('loadeddata', ok, { once: true });
+    v.addEventListener('canplay', ok, { once: true });
+    v.addEventListener('error', () => { if (!finished) { finished = true; reject(new Error('This video could not be opened.')); } }, { once: true });
+    v.src = src;
+    v.load();
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {});
+    setTimeout(() => { if (!finished) { finished = true; reject(new Error('Timed out loading the video.')); } }, 30000);
   });
 }
 
-$("file").addEventListener("change", async () => {
-  const file = $("file").files?.[0];
-  if(!file) return;
+function seek(v, t) {
+  return new Promise(res => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; v.removeEventListener('seeked', fin); res(); } };
+    v.addEventListener('seeked', fin);
+    v.currentTime = t;
+    setTimeout(fin, 3000);
+  });
+}
 
-  if(fileURL) URL.revokeObjectURL(fileURL);
-  fileURL = URL.createObjectURL(file);
-  box = null;
-  candidates = [];
-  selected.clear();
+fileInput.onchange = async () => {
+  const f = fileInput.files[0]; if (!f) return;
+  const msg = document.getElementById('loadMsg');
+  msg.textContent = 'Loading video...';
+  try {
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(f);
+    const v = await makeVideo(url);
+    await seek(v, 0.1);
+    cv.width = v.videoWidth; cv.height = v.videoHeight;
+    ctx.drawImage(v, 0, 0);
+    window.firstFrame = ctx.getImageData(0, 0, cv.width, cv.height);
+    v.remove();
+    msg.textContent = 'Video loaded.';
+    document.getElementById('step2').classList.remove('hidden');
+    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    msg.textContent = 'Problem: ' + e.message;
+  }
+};
 
-  video.pause();
-  video.src = fileURL;
-  video.load();
+function redraw() {
+  ctx.putImageData(window.firstFrame, 0, 0);
+  if (box) { ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = Math.max(3, cv.width / 300); ctx.strokeRect(...box); }
+}
+function pos(e) {
+  const r = cv.getBoundingClientRect(); const t = e.touches ? e.touches[0] : e;
+  return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
+}
+function down(e) { e.preventDefault(); dragStart = pos(e); }
+function move(e) {
+  if (!dragStart) return; e.preventDefault();
+  const p = pos(e);
+  box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]),
+         Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
+  redraw();
+}
+function up() { dragStart = null; }
+['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
+['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
+['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
 
-  setStatus("loadStatus", `Opening ${file.name}…`);
+async function findPitches() {
+  if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
+  const sens = parseInt(document.getElementById('sens').value);
+  const threshold = 0.10 - sens * 0.007;   // fraction of changed pixels in the box
+  const minRun = 3;                         // samples in a row above threshold (about 0.3 seconds)
+  const STEP = 1 / 10;                      // sample 10 times per second
+  const msg = document.getElementById('msg');
+  const prog = document.getElementById('prog');
 
-  try{
-    await new Promise((resolve, reject) => {
-      if(video.readyState >= 2 && video.videoWidth) return resolve();
+  msg.textContent = 'Preparing...';
+  let v;
+  try { v = await makeVideo(url); } catch (e) { msg.textContent = 'Problem: ' + e.message; return; }
+  const dur = v.duration;
+  const [bx, by, bw, bh] = box.map(Math.round);
+  const W = 160, H = Math.max(1, Math.round(160 * bh / bw));
+  const small = document.createElement('canvas'); small.width = W; small.height = H;
+  const sctx = small.getContext('2d', { willReadFrequently: true });
 
-      const timer = setTimeout(() => reject(new Error("The video metadata loaded, but Safari did not decode a preview frame. Tap Play on the video and try again.")), 30000);
+  prog.classList.remove('hidden'); prog.max = dur;
 
-      video.addEventListener("loadeddata", () => {
-        clearTimeout(timer);
-        resolve();
-      }, {once:true});
+  // Pass 1: record how much changed in the box at every sample
+  const times = [], levels = [];
+  let prev = null;
+  for (let t = 0; t < dur; t += STEP) {
+    await seek(v, t);
+    sctx.drawImage(v, bx, by, bw, bh, 0, 0, W, H);
+    const d = sctx.getImageData(0, 0, W, H).data;
+    const gray = new Uint8Array(W * H);
+    for (let i = 0; i < gray.length; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
+    let level = 0;
+    if (prev) {
+      let changed = 0;
+      for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) changed++;
+      level = changed / gray.length;
+    }
+    times.push(t); levels.push(level);
+    prev = gray;
+    prog.value = t;
+    msg.textContent = `Scanning... ${Math.round(t / dur * 100)}%  (keep this screen open)`;
+  }
+  v.remove();
 
-      video.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(new Error("This video format could not be decoded by this browser."));
-      }, {once:true});
-    });
+  // Pass 2: find stretches of sustained motion, with a lockout after each pitch
+  const pitches = [];   // {start, end} of the motion itself
+  let i = 0;
+  while (i < times.length) {
+    if (levels[i] > threshold) {
+      let j = i;
+      while (j < times.length && levels[j] > threshold) j++;
+      const runLen = j - i;
+      if (runLen >= minRun) {
+        const last = pitches[pitches.length - 1];
+        if (last && times[i] - last.end <= GROUP_GAP) {
+          last.end = times[j - 1];                 // same pitch, extend it
+        } else if (!last || times[i] - last.end >= LOCKOUT) {
+          pitches.push({ start: times[i], end: times[j - 1] });
+        }                                          // else: inside the lockout, ignore
+      }
+      i = j;
+    } else {
+      i++;
+    }
+  }
 
-    syncOverlaySize();
-    $("selectStep").classList.remove("hidden");
-    $("scanStep").classList.remove("hidden");
-    $("scanBtn").disabled = false;
+  clips = pitches.map(p => ({
+    start: Math.max(0, p.start - PRE),
+    end: Math.min(dur, p.start + CLIP_LEN)
+  }));
 
-    setStatus("loadStatus", `Video loaded: ${video.duration.toFixed(1)} seconds · ${video.videoWidth} × ${video.videoHeight}.`);
-    setStatus("boxStatus", "Pause on a frame where Brayden is visible, then drag a box around his full body.");
+  msg.textContent = `Done. Found ${clips.length} pitches.`;
+  prog.classList.add('hidden');
+  showClips();
+}
 
-    $("selectStep").scrollIntoView({behavior:"smooth"});
-
-  }catch(error){
-    setStatus("loadStatus", error.message);
+function showClips() {
+  document.getElementById('step3').classList.remove('hidden');
+  document.getElementById('count').textContent = `${clips.length} pitches found`;
+  const list = document.getElementById('clipList'); list.innerHTML = '';
+  clips.forEach((c, i) => {
+    const b = document.createElement('button'); b.className = 'alt';
+    b.textContent = `Pitch ${i + 1}  (${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s)`;
+    b.onclick = () => gotoClip(i); list.appendChild(b);
+  });
+  player.src = url;
+  player.onloadeddata = () => gotoClip(0);
+  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+}
+function gotoClip(i) {
+  if (!clips.length) return;
+  cur = (i + clips.length) % clips.length;
+  player.currentTime = clips[cur].start;
+  player.play();
+}
+player.addEventListener('timeupdate', () => {
+  if (!clips.length) return;
+  const c = clips[cur];
+  if (player.currentTime >= c.end) {
+    if (loop) player.currentTime = c.start;
+    else if (reel) gotoClip(cur + 1);
+    else player.pause();
   }
 });
-
-video.addEventListener("loadedmetadata", syncOverlaySize);
-video.addEventListener("resize", syncOverlaySize);
-
-$("playBtn").onclick = () => video.paused ? video.play().catch(() => {}) : video.pause();
-
-$("clearBox").onclick = () => {
-  box = null;
-  drawBox();
-  setStatus("boxStatus", "Box cleared. Draw a new box around Brayden.");
-};
-
-async function loadAI(){
-  if(poseLandmarker) return poseLandmarker;
-
-  setStatus("modelStatus", "Loading MediaPipe pose model. First use requires an internet connection…");
-  setMeter(15);
-
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-  );
-
-  setMeter(50);
-
-  poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task",
-      delegate: "CPU"
-    },
-    runningMode: "VIDEO",
-    numPoses: 4,
-    minPoseDetectionConfidence: 0.25,
-    minPosePresenceConfidence: 0.25,
-    minTrackingConfidence: 0.25
-  });
-
-  setMeter(100);
-  setStatus("modelStatus", "AI pose model loaded. Body landmarks will now be analyzed.");
-
-  return poseLandmarker;
-}
-
-function poseInsideBox(landmarks){
-  if(!box) return false;
-
-  const [x,y,w,h] = box;
-  const torsoIds = [11,12,23,24];
-
-  let sx=0, sy=0, count=0;
-
-  for(const id of torsoIds){
-    const p=landmarks[id];
-
-    if(p && (p.visibility ?? 0) > 0.15){
-      sx+=p.x*video.videoWidth;
-      sy+=p.y*video.videoHeight;
-      count++;
-    }
-  }
-
-  if(!count) return false;
-
-  const cx=sx/count, cy=sy/count;
-
-  return cx>=x && cx<=x+w && cy>=y && cy<=y+h;
-}
-
-const TRACK = [11,12,13,14,15,16,23,24,25,26,27,28,29,30,31,32];
-
-function poseFeatures(landmarks){
-  if(!landmarks) return null;
-
-  return TRACK.map(id => {
-    const p=landmarks[id];
-
-    if(!p || (p.visibility ?? 0) < 0.12) return null;
-
-    return [
-      p.x*video.videoWidth,
-      p.y*video.videoHeight
-    ];
-  });
-}
-
-function poseDelta(a,b){
-  if(!a || !b) return 0;
-
-  let sum=0, count=0;
-  const scale=Math.max(1, Math.hypot(box[2],box[3]));
-
-  for(let i=0;i<a.length;i++){
-    if(!a[i] || !b[i]) continue;
-
-    sum += Math.hypot(
-      a[i][0]-b[i][0],
-      a[i][1]-b[i][1]
-    ) / scale;
-
-    count++;
-  }
-
-  return count ? sum/count : 0;
-}
-
-function pixelSample(){
-  const [x,y,w,h]=box.map(Math.round);
-
-  const c=document.createElement("canvas");
-  c.width=96;
-  c.height=Math.max(24,Math.round(96*h/w));
-
-  const cctx=c.getContext("2d",{willReadFrequently:true});
-
-  cctx.drawImage(video,x,y,w,h,0,0,c.width,c.height);
-
-  const rgba=cctx.getImageData(0,0,c.width,c.height).data;
-  const gray=new Uint8Array(c.width*c.height);
-
-  for(let i=0;i<gray.length;i++){
-    gray[i]=(rgba[i*4]+rgba[i*4+1]+rgba[i*4+2])/3;
-  }
-
-  return gray;
-}
-
-function pixelDelta(a,b){
-  if(!a || !b) return 0;
-
-  let changed=0;
-
-  for(let i=0;i<a.length;i++){
-    if(Math.abs(a[i]-b[i])>25) changed++;
-  }
-
-  return changed/a.length;
-}
-
-function runs(samples,key,threshold,minSamples){
-  const found=[];
-  let start=-1,last=-1;
-
-  for(let i=0;i<samples.length;i++){
-    if(samples[i][key]>=threshold){
-      if(start<0) start=i;
-      last=i;
-    }else if(start>=0){
-      if(last-start+1>=minSamples){
-        found.push({
-          start:samples[start].time,
-          end:samples[last].time,
-          source:key
-        });
-      }
-      start=-1;
-    }
-  }
-
-  if(start>=0 && last-start+1>=minSamples){
-    found.push({
-      start:samples[start].time,
-      end:samples[last].time,
-      source:key
-    });
-  }
-
-  return found;
-}
-
-function mergeRuns(items){
-  items.sort((a,b)=>a.start-b.start);
-
-  const merged=[];
-
-  for(const item of items){
-    const last=merged.at(-1);
-
-    if(last && item.start-last.end<=2.5){
-      last.end=Math.max(last.end,item.end);
-      last.sources.add(item.source);
-    }else{
-      merged.push({
-        start:item.start,
-        end:item.end,
-        sources:new Set([item.source])
-      });
-    }
-  }
-
-  return merged;
-}
-
-function formatTime(t){
-  return `${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,"0")}`;
-}
-
-async function scan(){
-  if(busy) return;
-
-  if(!box || box[2]<12 || box[3]<12){
-    alert("Draw a box around Brayden first.");
-    return;
-  }
-
-  busy=true;
-  $("scanBtn").disabled=$("rescanBtn").disabled=true;
-  $("progress").classList.remove("hidden");
-
-  video.pause();
-
-  const originalTime=video.currentTime;
-
-  try{
-    const ai=await loadAI();
-    const duration=video.duration;
-    const total=Math.ceil(duration/SAMPLE);
-    const samples=[];
-
-    let previousPose=null;
-    let previousPixels=null;
-    let previousTimestamp=-1;
-
-    for(let i=0;i<total;i++){
-      const time=Math.min(i*SAMPLE,Math.max(0,duration-0.05));
-
-      await seekTo(time);
-
-      const timestamp=Math.max(
-        previousTimestamp+1,
-        Math.round(time*1000)
-      );
-
-      previousTimestamp=timestamp;
-
-      let pose=0, pixels=0;
-
-      try{
-        const result=ai.detectForVideo(video,timestamp);
-        let chosen=null;
-
-        for(const landmarks of (result.landmarks||[])){
-          if(poseInsideBox(landmarks)){
-            chosen=landmarks;
-            break;
-          }
-        }
-
-        const features=poseFeatures(chosen);
-        pose=poseDelta(previousPose,features);
-        previousPose=features;
-
-      }catch(error){
-        console.warn("Pose inference frame failed",error);
-      }
-
-      try{
-        const currentPixels=pixelSample();
-        pixels=pixelDelta(previousPixels,currentPixels);
-        previousPixels=currentPixels;
-
-      }catch(error){
-        console.warn("Pixel-motion sample failed",error);
-      }
-
-      samples.push({time,pose,pixels});
-
-      if(i%3===0){
-        $("progress").value=(i+1)/total*100;
-
-        setStatus(
-          "scanStatus",
-          `Analyzing ${formatTime(time)} of ${formatTime(duration)} · ${Math.round((i+1)/total*100)}%`
-        );
-
-        await wait(0);
-      }
-    }
-
-    const poseRuns=[
-      ...runs(samples,"pose",0.025,2),
-      ...runs(samples,"pose",0.016,3)
-    ];
-
-    const motionRuns=runs(samples,"pixels",0.07,2);
-
-    candidates=mergeRuns([...poseRuns,...motionRuns]).map(item=>({
-      start:Math.max(0,item.start-PRE),
-      end:Math.min(duration,item.end+POST),
-      source:
-        item.sources.has("pose") && item.sources.has("pixels")
-        ? "AI + motion"
-        : item.sources.has("pose")
-        ? "AI pose"
-        : "Motion backup"
-    }));
-
-    selected=new Set(candidates.map((_,index)=>index));
-
-    renderCandidates();
-
-    setStatus(
-      "scanStatus",
-      candidates.length
-      ? `Found ${candidates.length} possible pitch segments. Review each candidate; labels show whether AI pose detection, motion backup, or both contributed.`
-      : "No candidates were detected. Try a larger box that includes Brayden’s entire body and throwing arm, then rescan."
-    );
-
-  }catch(error){
-    setStatus("scanStatus",`Scan failed: ${error.message || error}`);
-    console.error(error);
-
-  }finally{
-    busy=false;
-    $("scanBtn").disabled=$("rescanBtn").disabled=false;
-    $("progress").classList.add("hidden");
-    video.pause();
-
-    try{
-      await seekTo(originalTime);
-    }catch(_){}
-  }
-}
-
-function renderCandidates(){
-  const list=$("clips");
-  list.replaceChildren();
-
-  candidates.forEach((candidate,index)=>{
-    const row=document.createElement("div");
-    row.className="clip";
-
-    const label=document.createElement("label");
-    label.style.display="flex";
-    label.style.gap="9px";
-    label.style.alignItems="center";
-
-    const checkbox=document.createElement("input");
-    checkbox.type="checkbox";
-    checkbox.checked=selected.has(index);
-
-    checkbox.onchange=()=>checkbox.checked
-      ?selected.add(index)
-      :selected.delete(index);
-
-    const title=document.createElement("strong");
-    title.textContent=`Candidate ${index+1}`;
-
-    const times=document.createElement("span");
-    times.className="pill";
-    times.textContent=`${formatTime(candidate.start)}–${formatTime(candidate.end)}`;
-
-    const source=document.createElement("span");
-    source.className=candidate.source==="AI pose"?"tag":"tag motion";
-    source.textContent=candidate.source;
-
-    label.append(checkbox,title,times,source);
-
-    const preview=document.createElement("button");
-    preview.className="secondary";
-    preview.textContent="Preview";
-
-    preview.onclick=async()=>{
-      try{
-        await seekTo(candidate.start);
-        await video.play();
-
-      }catch(error){
-        setStatus("scanStatus",`Could not preview: ${error.message}`);
-        return;
-      }
-
-      const stop=()=>{
-        if(video.currentTime>=candidate.end){
-          video.pause();
-          video.removeEventListener("timeupdate",stop);
-        }
-      };
-
-      video.addEventListener("timeupdate",stop);
-
-      video.scrollIntoView({
-        behavior:"smooth",
-        block:"center"
-      });
-    };
-
-    row.append(label,preview);
-    list.append(row);
-  });
-}
-
-$("scanBtn").onclick=scan;
-$("rescanBtn").onclick=scan;
-
-$("selectAllBtn").onclick=()=>{
-  selected=new Set(candidates.map((_,i)=>i));
-  renderCandidates();
-};
-
-$("selectNoneBtn").onclick=()=>{
-  selected.clear();
-  renderCandidates();
-};
+document.querySelectorAll('.spd').forEach(b => b.onclick = () => {
+  player.playbackRate = parseFloat(b.dataset.s);
+  document.querySelectorAll('.spd').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+});
+function togglePlay() { player.paused ? player.play() : player.pause(); }
+function skip(s) { player.currentTime = Math.max(0, player.currentTime + s); }
+function stepFrame(d) { player.pause(); player.currentTime = Math.max(0, player.currentTime + d / FPS); }
+function toggleLoop() { loop = !loop; document.getElementById('loopBtn').textContent = 'Loop: ' + (loop ? 'on' : 'off'); }
+function toggleReel() { reel = !reel; document.getElementById('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); }
 </script>
 </body>
 </html>
