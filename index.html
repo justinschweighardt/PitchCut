@@ -25,6 +25,7 @@
   button { font:inherit; font-weight:700; border:0; border-radius:12px; padding:12px 16px; cursor:pointer; color:var(--text); background:var(--panel2); }
   button:active { transform:scale(.97); }
   button.primary { background:linear-gradient(180deg,#ffc34d,var(--accent)); color:#1b1200; }
+  button.danger { background:#3a1518; color:#ffb4b8; }
   button.round { width:56px; height:56px; border-radius:50%; padding:0; font-size:20px; display:inline-flex; align-items:center; justify-content:center; }
   button.round.big { width:68px; height:68px; background:linear-gradient(180deg,#ffc34d,var(--accent)); color:#1b1200; font-size:26px; }
   .seg { display:flex; background:var(--panel2); border-radius:12px; padding:4px; gap:4px; }
@@ -45,14 +46,17 @@
   .pcard .t { color:var(--muted); font-size:13px; margin-top:2px; font-weight:600; }
   .tag { display:inline-block; margin-top:6px; font-size:11px; padding:2px 8px; border-radius:999px; background:#0e2a4a; color:#9fd0ff; }
   .tag.ai { background:#3a2a05; color:#ffd27a; }
+  .tag.you { background:#0f3a22; color:#8ff0b5; }
   #msg { margin-top:8px; color:var(--muted); font-size:14px; }
   .toggles { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   .toggles button.on { background:var(--accent2); color:#06182e; }
   #peaks { color:var(--muted); font-size:13px; line-height:1.5; margin-top:8px; white-space:pre-wrap; }
   .legend { font-size:12px; color:var(--muted); margin-top:6px; }
-  .legend b.a { color:#ffb020; } .legend b.b { color:#3ba3ff; } .legend b.r { color:#e5484d; } .legend b.g { color:#3ddc84; } .legend b.l { color:#b58cff; }
+  .legend b.a { color:#ffb020; } .legend b.b { color:#3ba3ff; } .legend b.r { color:#e5484d; } .legend b.g { color:#3ddc84; }
   .two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   @media (max-width:520px) { .two { grid-template-columns:1fr; } }
+  .editbar { margin-top:16px; padding-top:14px; border-top:1px solid #22314f; }
+  .editbar .lbl { color:var(--muted); font-size:13px; font-weight:700; margin-bottom:6px; }
 </style>
 </head>
 <body>
@@ -70,7 +74,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.5</div>
+  <div class="ver">v4.6</div>
 </header>
 
 <div class="wrap">
@@ -135,30 +139,37 @@
       <button id="loopBtn" onclick="toggleLoop()">Loop: off</button>
       <button id="reelBtn" onclick="toggleReel()">Play all: off</button>
     </div>
+
+    <div class="editbar">
+      <div class="lbl">Fix the list</div>
+      <div class="row" style="margin-top:0">
+        <button class="primary" onclick="addPitch()">Add pitch here</button>
+        <button class="danger" onclick="removePitch()">Remove this pitch</button>
+      </div>
+      <div class="row">
+        <button onclick="nudge(-0.5)">Start earlier 0.5s</button>
+        <button onclick="nudge(0.5)">Start later 0.5s</button>
+      </div>
+      <div class="hint" id="editMsg">To add a missed pitch: pause the video on the moment of the pitch, then tap Add pitch here.</div>
+    </div>
   </div>
 
   <div class="card hidden" id="debugCard">
     <h3>Detection graph</h3>
     <canvas id="dbgGraph"></canvas>
-    <div class="legend"><b class="b">Blue</b> motion in the box. <b class="a">Amber</b> AI throwing-arm speed. <b class="l">Purple</b> AI leg lift. <b class="r">Red line</b> AI arm cutoff. <b class="g">Green lines</b> pitches kept, numbered.</div>
+    <div class="legend"><b class="b">Blue</b> motion in the box. <b class="a">Amber</b> AI throwing-arm speed. <b class="r">Red line</b> AI cutoff. <b class="g">Green lines</b> pitches kept, numbered.</div>
     <div id="peaks"></div>
   </div>
 </div>
 
 <script type="module">
 // ---------------- Settings you can change ----------------
-const PRE = 2.0;             // seconds kept before the ball is thrown
-const POST = 2.5;            // seconds kept after the ball reaches the glove
-const THROW_TO_GLOVE = 0.6;  // seconds from release to the glove
+const PRE = 2.0;             // seconds kept before the pitch moment
+const AFTER = 3.5;           // seconds kept after the pitch moment (fixed, so every clip is the same length)
 const WINDUP_TO_THROW = 1.2; // motion-only estimate: seconds from first motion to release
 const LOCKOUT = 6.0;         // two pitches cannot be closer together than this (covers the return throw)
 const GROUP_GAP = 1.5;       // motion closer together than this is one burst
 const MERGE_WINDOW = 3.0;    // motion and AI hits this close together count as the same pitch
-const LEG_WINDOW = 1.5;      // a leg lift this many seconds before the arm peak gives a bonus
-const LEG_MIN = 0.03;        // knee rise (fraction of body height) that counts as a leg lift
-const LEG_BONUS = 3.0;       // how much a leg lift boosts a moment's rank
-const BOTH_BONUS = 2.0;      // boost when both detectors agree
-const MOTION_ONLY_WEIGHT = 0.5; // a motion-only moment counts for less when the AI is running
 const FPS = 30;
 const POSE_STEP = 1 / 15;    // AI scan samples per second
 const MOTION_STEP = 1 / 10;  // motion scan samples per second
@@ -168,7 +179,7 @@ import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@m
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
 const player = $('player');
-let url = null, box = null, dragStart = null, mode = 'both', frameCanvas = null;
+let url = null, box = null, dragStart = null, mode = 'both', frameCanvas = null, videoDur = 0;
 let clips = [], cur = 0, loop = false, reel = false, landmarker = null;
 
 function makeVideo(src) {
@@ -207,6 +218,7 @@ $('file').onchange = async () => {
     if (url) URL.revokeObjectURL(url);
     url = URL.createObjectURL(f);
     const v = await makeVideo(url);
+    videoDur = v.duration;
     await seek(v, 0.1);
     cv.width = v.videoWidth; cv.height = v.videoHeight;
     ctx.drawImage(v, 0, 0);
@@ -300,7 +312,7 @@ function motionEvents(series, threshold) {
   return out;
 }
 
-// ---------- Detector 2: AI pose (arm speed plus leg lift) ----------
+// ---------- Detector 2: AI pose (throwing arm speed) ----------
 async function getLandmarker(setMsg) {
   if (landmarker) return landmarker;
   setMsg('Loading the AI model (first time only)...');
@@ -338,11 +350,8 @@ async function poseScan(v, dur, setMsg) {
         const vis = [p[15].visibility == null ? 1 : p[15].visibility, p[16].visibility == null ? 1 : p[16].visibility];
         let body = Math.max(p[27].y, p[28].y) - p[0].y;
         if (!(body > 0.3)) body = ((p[23].y + p[24].y) / 2 - p[0].y) * 1.8;
-        if (body > 0.2) {
-          const lift = Math.max(p[23].y - p[25].y, p[24].y - p[26].y) / body;
-          r = { t: x, ok: true, vis, body: body * crop.height, lift,
-            wr: [{ x: p[15].x * crop.width, y: p[15].y * crop.height }, { x: p[16].x * crop.width, y: p[16].y * crop.height }] };
-        }
+        if (body > 0.2) r = { t: x, ok: true, vis, body: body * crop.height,
+          wr: [{ x: p[15].x * crop.width, y: p[15].y * crop.height }, { x: p[16].x * crop.width, y: p[16].y * crop.height }] };
       }
     } catch (e) {}
     rec.push(r);
@@ -362,43 +371,33 @@ async function poseScan(v, dur, setMsg) {
   }
   const arm = p90(sp[0]) >= p90(sp[1]) ? 0 : 1;
   const seen = rec.filter(r => r.ok).length / Math.max(1, rec.length);
-  return { t: rec.map(r => r.t), s: sp[arm], lift: rec.map(r => r.ok ? Math.max(0, r.lift) : 0), seen };
+  return { t: rec.map(r => r.t), s: sp[arm], seen };
 }
-// A fast arm burst is a candidate. A leg lift just before it raises its rank.
 function poseEvents(series, bar) {
-  const { t, s, lift } = series; const out = []; let i = 0;
+  const { t, s } = series; const out = []; let i = 0;
   while (i < s.length) {
     if (s[i] > bar * 0.5) {
       let j = i, peak = i, above = 0;
       while (j < s.length && s[j] > bar * 0.5) { if (s[j] > s[peak]) peak = j; above++; j++; }
-      if (s[peak] > bar && above >= 2) {
-        let bestLift = 0;
-        for (let k = 0; k < t.length; k++) if (t[k] <= t[peak] && t[k] >= t[peak] - LEG_WINDOW) bestLift = Math.max(bestLift, lift[k]);
-        const hasLeg = bestLift >= LEG_MIN;
-        const base = s[peak] / bar;
-        out.push({ time: t[peak], score: base * (hasLeg ? LEG_BONUS : 1), src: 'pose', hasLeg });
-      }
+      if (s[peak] > bar && above >= 2) out.push({ time: t[peak], score: s[peak] / bar, src: 'pose' });
       i = j;
     } else i++;
   }
   return out;
 }
 
-// ---------- Combine, with automatic pitch counting ----------
-function combine(cands, strict, havePose) {
+// ---------- Combine (same as v4.3) ----------
+function combine(cands, strict, bothModes) {
   const sorted = [...cands].sort((a, b) => a.time - b.time);
   const merged = [];
   for (const c of sorted) {
-    const w = (havePose && c.src === 'motion') ? MOTION_ONLY_WEIGHT : 1;
     const last = merged[merged.length - 1];
     if (last && c.time - last.time <= MERGE_WINDOW) {
-      last.score += c.score * w;
-      if (c.src === 'pose') { last.time = c.time; last.hasLeg = last.hasLeg || c.hasLeg; }
+      last.score += c.score;
+      if (c.src === 'pose' && last.srcs.indexOf('pose') === -1) last.time = c.time;
       if (last.srcs.indexOf(c.src) === -1) last.srcs.push(c.src);
-    } else merged.push({ time: c.time, score: c.score * w, srcs: [c.src], hasLeg: !!c.hasLeg });
+    } else merged.push({ time: c.time, score: c.score, srcs: [c.src] });
   }
-  // moments seen by both detectors get a boost
-  merged.forEach(m => { if (m.srcs.length > 1) m.score *= BOTH_BONUS; });
   const spaced = [];
   for (const m of [...merged].sort((a, b) => b.score - a.score)) {
     if (spaced.some(k => Math.abs(k.time - m.time) < LOCKOUT)) continue;
@@ -406,9 +405,14 @@ function combine(cands, strict, havePose) {
   }
   if (!spaced.length) return { kept: [], considered: [] };
   const top = Math.max(...spaced.map(m => m.score));
-  const relMin = 0.05 + strict * 0.04;   // 0.09 at strictness 1, 0.45 at strictness 10
-  const kept = spaced.filter(m => m.score >= top * relMin);
-  return { kept: kept.sort((a, b) => a.time - b.time), considered: merged.sort((a, b) => a.time - b.time) };
+  const relMin = 0.15 + strict * 0.05;
+  const soloMin = 1.0 + strict * 0.1;
+  const kept = spaced.filter(m => {
+    const both = m.srcs.length > 1;
+    if (both || !bothModes) return m.score >= top * relMin;
+    return m.score >= top * relMin && m.score >= soloMin;
+  });
+  return { kept: kept.sort((a, b) => a.time - b.time), considered: spaced.sort((a, b) => a.time - b.time) };
 }
 
 // ---------- Debug graph ----------
@@ -427,8 +431,8 @@ function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
   const X = t => 10 + (t / dur) * 980, top = 20, bot = 230;
   g.strokeStyle = '#22314f'; g.fillStyle = '#8fa3bf'; g.font = '14px sans-serif'; g.lineWidth = 1;
   for (let s = 0; s <= dur; s += 10) { g.beginPath(); g.moveTo(X(s), top); g.lineTo(X(s), bot); g.stroke(); g.fillText(s + 's', X(s) + 2, 250); }
-  const line = (ts, ys, max, color, w) => {
-    g.strokeStyle = color; g.lineWidth = w || 2; g.beginPath();
+  const line = (ts, ys, max, color) => {
+    g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
     ys.forEach((y, i) => { const px = X(ts[i]), py = bot - Math.min(1, y / max) * (bot - top); i ? g.lineTo(px, py) : g.moveTo(px, py); });
     g.stroke();
   };
@@ -437,21 +441,31 @@ function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
   if (pose) {
     const mx = Math.max(bar * 1.6, ...pose.s);
     line(pose.t, pose.s, mx, '#ffb020');
-    const lmx = Math.max(LEG_MIN * 2, ...pose.lift);
-    line(pose.t, pose.lift, lmx, '#b58cff', 2);
     const by = bot - Math.min(1, bar / mx) * (bot - top);
     g.strokeStyle = '#e5484d'; g.setLineDash([6, 5]); g.beginPath(); g.moveTo(10, by); g.lineTo(990, by); g.stroke(); g.setLineDash([]);
     txt += 'AI could see the pitcher in ' + Math.round(seen * 100) + '% of frames.\n';
     const pk = topPeaks(pose.t, pose.s, 8, 2);
     txt += 'AI arm-speed peaks (cutoff ' + bar.toFixed(1) + '): ' + pk.map(i => pose.t[i].toFixed(1) + 's = ' + pose.s[i].toFixed(1)).join(', ') + '\n';
-    const lk = topPeaks(pose.t, pose.lift, 8, 2);
-    txt += 'AI leg-lift peaks (bonus at ' + LEG_MIN.toFixed(2) + '): ' + lk.map(i => pose.t[i].toFixed(1) + 's = ' + pose.lift[i].toFixed(2)).join(', ') + '\n';
   }
   g.strokeStyle = '#3ddc84'; g.lineWidth = 3; g.fillStyle = '#3ddc84'; g.font = 'bold 16px sans-serif';
   kept.forEach((k, n) => { g.beginPath(); g.moveTo(X(k.time), top); g.lineTo(X(k.time), bot); g.stroke(); g.fillText(String(n + 1), X(k.time) + 4, top + 14); });
-  txt += 'Moments considered (time, strength, seen by): ' + considered.map(m => m.time.toFixed(1) + 's, ' + m.score.toFixed(1) + ', ' + m.srcs.join('+') + (m.hasLeg ? '+leg' : '')).join('  |  ') + '\n';
+  txt += 'Moments considered (time, strength, seen by): ' + considered.map(m => m.time.toFixed(1) + 's, ' + m.score.toFixed(1) + ', ' + m.srcs.join('+')).join('  |  ') + '\n';
   txt += 'Kept pitch moments: ' + kept.map(k => k.time.toFixed(1) + 's').join(', ');
   $('peaks').textContent = txt;
+}
+
+// ---------- Clips: fixed length, editable ----------
+function makeClip(moment, srcs) {
+  const start = Math.max(0, Math.min(moment - PRE, Math.max(0, videoDur - (PRE + AFTER))));
+  return { moment, start, end: Math.min(videoDur, start + PRE + AFTER), srcs };
+}
+function refreshClips(keepMoment) {
+  clips.sort((a, b) => a.moment - b.moment);
+  showClips(false);
+  if (keepMoment != null) {
+    const i = clips.findIndex(c => Math.abs(c.moment - keepMoment) < 0.01);
+    if (i >= 0) { cur = i; highlight(); }
+  }
 }
 
 // ---------- Run ----------
@@ -464,7 +478,7 @@ async function findPitches() {
   $('msg').textContent = 'Preparing...'; $('prog').classList.remove('hidden');
   let v;
   try { v = await makeVideo(url); } catch (e) { $('msg').textContent = 'Problem: ' + e.message; return; }
-  const dur = v.duration;
+  const dur = v.duration; videoDur = dur;
   let motion = null, pose = null, note = '';
   try {
     if (mode === 'both' || mode === 'motion') motion = await motionScan(v, dur);
@@ -478,32 +492,30 @@ async function findPitches() {
   const cands = [];
   if (motion) cands.push(...motionEvents(motion, threshold));
   if (pose) cands.push(...poseEvents(pose, bar));
-  const { kept, considered } = combine(cands, strict, !!pose);
-  clips = kept.map(k => ({
-    start: Math.max(0, k.time - PRE),
-    end: Math.min(dur, k.time + THROW_TO_GLOVE + POST),
-    srcs: k.srcs
-  }));
+  const { kept, considered } = combine(cands, strict, !!(motion && pose));
+  clips = kept.map(k => makeClip(k.time, k.srcs));
   drawDebug(dur, motion, pose, bar, threshold, kept, considered, pose ? pose.seen : 0);
-  $('msg').textContent = `Done. Found ${clips.length} pitches.` + note;
+  $('msg').textContent = `Done. Found ${clips.length} pitches. Use the buttons under the video to add, remove or nudge clips.` + note;
   $('prog').classList.add('hidden');
-  showClips();
+  showClips(true);
 }
 window.findPitches = findPitches;
 
-// ---------- Step 3: review ----------
-function showClips() {
+// ---------- Step 3: review and edit ----------
+function showClips(loadFirst) {
   $('step3').classList.remove('hidden');
   const box3 = $('cards'); box3.innerHTML = '';
   clips.forEach((c, i) => {
     const b = document.createElement('button'); b.className = 'pcard';
-    const tags = c.srcs.map(s => `<span class="tag ${s === 'pose' ? 'ai' : ''}">${s === 'pose' ? 'AI pose' : 'Motion'}</span>`).join(' ');
+    const tags = c.srcs.map(s => s === 'you' ? '<span class="tag you">Added by you</span>' : `<span class="tag ${s === 'pose' ? 'ai' : ''}">${s === 'pose' ? 'AI pose' : 'Motion'}</span>`).join(' ');
     b.innerHTML = `<div class="n">Pitch ${i + 1}</div><div class="t">${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s</div>${tags}`;
     b.onclick = () => gotoClip(i); box3.appendChild(b);
   });
-  player.src = url;
-  player.onloadeddata = () => gotoClip(0);
-  $('step3').scrollIntoView({ behavior: 'smooth' });
+  if (loadFirst) {
+    player.src = url;
+    player.onloadeddata = () => gotoClip(0);
+    $('step3').scrollIntoView({ behavior: 'smooth' });
+  } else highlight();
 }
 function highlight() {
   document.querySelectorAll('.pcard').forEach((el, i) => el.classList.toggle('on', i === cur));
@@ -518,7 +530,7 @@ function gotoClip(i) {
 player.addEventListener('timeupdate', () => {
   if (!clips.length) return;
   const c = clips[cur];
-  if (player.currentTime >= c.end) {
+  if (c && player.currentTime >= c.end) {
     if (loop) player.currentTime = c.start;
     else if (reel) gotoClip(cur + 1);
     else player.pause();
@@ -530,6 +542,36 @@ document.querySelectorAll('#speeds button').forEach(b => b.onclick = () => {
   player.playbackRate = parseFloat(b.dataset.s);
   document.querySelectorAll('#speeds button').forEach(x => x.classList.toggle('on', x === b));
 });
+
+window.addPitch = () => {
+  const t = player.currentTime;
+  if (clips.some(c => t >= c.start && t <= c.end)) {
+    $('editMsg').textContent = 'That moment is already inside a clip. Pause on a moment outside the existing clips.';
+    return;
+  }
+  // the pause point is treated as the moment of the pitch
+  const c = makeClip(t, ['you']);
+  clips.push(c);
+  refreshClips(c.moment);
+  $('editMsg').textContent = `Added a pitch at ${t.toFixed(1)}s. Clip runs ${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s.`;
+};
+window.removePitch = () => {
+  if (!clips.length) return;
+  const gone = clips.splice(cur, 1)[0];
+  cur = Math.max(0, Math.min(cur, clips.length - 1));
+  refreshClips(null);
+  $('editMsg').textContent = `Removed the pitch at ${gone.moment.toFixed(1)}s.`;
+};
+window.nudge = d => {
+  if (!clips.length) return;
+  const c = clips[cur];
+  const len = c.end - c.start;
+  c.start = Math.max(0, Math.min(videoDur - len, c.start + d));
+  c.end = c.start + len; c.moment = c.start + PRE;
+  refreshClips(c.moment);
+  player.currentTime = c.start;
+  $('editMsg').textContent = `Clip now runs ${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s.`;
+};
 window.togglePlay = () => player.paused ? player.play() : player.pause();
 window.skip = s => { player.currentTime = Math.max(0, player.currentTime + s); };
 window.stepFrame = d => { player.pause(); player.currentTime = Math.max(0, player.currentTime + d / FPS); };
