@@ -29,6 +29,7 @@
   <div class="card">
     <h3>1. Choose your video</h3>
     <input type="file" id="file" accept="video/*">
+    <div id="loadMsg"></div>
   </div>
 
   <div class="card hidden" id="step2">
@@ -75,21 +76,62 @@ const PRE = 2.0, POST = 1.0, MERGE_GAP = 4.0, FPS = 30;
 const fileInput = document.getElementById('file');
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const player = document.getElementById('player');
-let url = null, box = null, dragStart = null, scale = 1;
+let url = null, box = null, dragStart = null;
 let clips = [], cur = 0, loop = false, reel = false;
 
-fileInput.onchange = () => {
+// Loads a video in a way that works on iPhone Safari.
+function makeVideo(src) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement('video');
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute('playsinline', '');
+    v.setAttribute('webkit-playsinline', '');
+    v.preload = 'auto';
+    v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    document.body.appendChild(v);
+    let finished = false;
+    const ok = () => { if (finished) return; finished = true; try { v.pause(); } catch (e) {} resolve(v); };
+    v.addEventListener('loadeddata', ok, { once: true });
+    v.addEventListener('canplay', ok, { once: true });
+    v.addEventListener('error', () => { if (!finished) { finished = true; reject(new Error('This video could not be opened.')); } }, { once: true });
+    v.src = src;
+    v.load();
+    const p = v.play();             // nudges iPhone Safari to actually load the video
+    if (p && p.catch) p.catch(() => {});
+    setTimeout(() => { if (!finished) { finished = true; reject(new Error('Timed out loading the video.')); } }, 30000);
+  });
+}
+
+function seek(v, t) {
+  return new Promise(res => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; v.removeEventListener('seeked', fin); res(); } };
+    v.addEventListener('seeked', fin);
+    v.currentTime = t;
+    setTimeout(fin, 3000);          // never get stuck on one frame
+  });
+}
+
+fileInput.onchange = async () => {
   const f = fileInput.files[0]; if (!f) return;
-  url = URL.createObjectURL(f);
-  const v = document.createElement('video');
-  v.muted = true; v.src = url;
-  v.onloadeddata = () => { v.currentTime = 0.1; };
-  v.onseeked = () => {
+  const msg = document.getElementById('loadMsg');
+  msg.textContent = 'Loading video...';
+  try {
+    if (url) URL.revokeObjectURL(url);
+    url = URL.createObjectURL(f);
+    const v = await makeVideo(url);
+    await seek(v, 0.1);
     cv.width = v.videoWidth; cv.height = v.videoHeight;
     ctx.drawImage(v, 0, 0);
     window.firstFrame = ctx.getImageData(0, 0, cv.width, cv.height);
+    v.remove();
+    msg.textContent = 'Video loaded.';
     document.getElementById('step2').classList.remove('hidden');
-  };
+    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    msg.textContent = 'Problem: ' + e.message;
+  }
 };
 
 function redraw() {
@@ -113,27 +155,25 @@ function up() { dragStart = null; }
 ['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
 ['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
 
-function seek(v, t) {
-  return new Promise(res => { v.onseeked = () => res(); v.currentTime = t; });
-}
-
 async function findPitches() {
   if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
   const sens = parseInt(document.getElementById('sens').value);
   const threshold = 0.09 - sens * 0.008;   // fraction of changed pixels in the box
   const minRun = 2;                         // samples in a row above threshold
   const STEP = 1 / 10;                      // sample 10 times per second
+  const msg = document.getElementById('msg');
+  const prog = document.getElementById('prog');
 
-  const v = document.createElement('video');
-  v.muted = true; v.src = url;
-  await new Promise(r => v.onloadeddata = r);
+  msg.textContent = 'Preparing...';
+  let v;
+  try { v = await makeVideo(url); } catch (e) { msg.textContent = 'Problem: ' + e.message; return; }
   const dur = v.duration;
   const [bx, by, bw, bh] = box.map(Math.round);
   const W = 160, H = Math.max(1, Math.round(160 * bh / bw));
   const small = document.createElement('canvas'); small.width = W; small.height = H;
   const sctx = small.getContext('2d', { willReadFrequently: true });
 
-  const prog = document.getElementById('prog'); prog.classList.remove('hidden'); prog.max = dur;
+  prog.classList.remove('hidden'); prog.max = dur;
   const hits = []; let prev = null, run = 0;
   for (let t = 0; t < dur; t += STEP) {
     await seek(v, t);
@@ -148,10 +188,10 @@ async function findPitches() {
     }
     prev = gray;
     prog.value = t;
-    document.getElementById('msg').textContent = `Scanning... ${Math.round(t / dur * 100)}%`;
+    msg.textContent = `Scanning... ${Math.round(t / dur * 100)}%  (keep this screen open)`;
   }
+  v.remove();
 
-  // group nearby hits, pad, and merge overlapping ranges
   const groups = [];
   hits.forEach(t => {
     if (groups.length && t - groups[groups.length - 1].slice(-1)[0] <= MERGE_GAP) groups[groups.length - 1].push(t);
@@ -164,7 +204,7 @@ async function findPitches() {
     else clips.push({ start: s, end: e });
   });
 
-  document.getElementById('msg').textContent = `Done. Found ${clips.length} pitches.`;
+  msg.textContent = `Done. Found ${clips.length} pitches.`;
   prog.classList.add('hidden');
   showClips();
 }
@@ -180,6 +220,7 @@ function showClips() {
   });
   player.src = url;
   player.onloadeddata = () => gotoClip(0);
+  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
 }
 function gotoClip(i) {
   if (!clips.length) return;
