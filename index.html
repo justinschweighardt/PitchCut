@@ -3,190 +3,133 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>PitchCut</title>
+<meta name="theme-color" content="#101a29">
+<title>PitchCut — AI Pitch Candidate Finder</title>
 <style>
-:root {
-  color-scheme: dark;
-  --bg:#0c1420;
-  --panel:#152235;
-  --muted:#a9bbcf;
-  --accent:#55c6ff;
-  --line:#2a3d55
-}
-* { box-sizing:border-box }
-body {
-  margin:0;
-  background:var(--bg);
-  color:#eef5fc;
-  font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif
-}
-header {
-  padding:16px 18px;
-  background:#111e2e;
-  border-bottom:1px solid var(--line);
-  font-size:22px;
-  font-weight:800
-}
-header span { color:var(--accent) }
-main { max-width:900px; margin:auto; padding:16px }
-.card {
-  background:var(--panel);
-  border:1px solid var(--line);
-  border-radius:14px;
-  padding:16px;
-  margin-bottom:14px
-}
-h2 { font-size:18px; margin:0 0 10px }
-p { color:var(--muted) }
-button {
-  border:0;
-  border-radius:9px;
-  background:var(--accent);
-  color:#062033;
-  font-weight:750;
-  font-size:15px;
-  padding:12px 15px;
-  margin:4px 4px 4px 0;
-  cursor:pointer
-}
-button.secondary { background:#2b4059; color:#eef5fc }
-button:disabled { opacity:.45 }
-input[type=file] { max-width:100%; padding:8px 0 }
-input[type=range] { width:100% }
-video,canvas {
-  display:block;
-  width:100%;
-  max-height:55vh;
-  background:#000;
-  border-radius:10px;
-  margin-top:10px
-}
-canvas { touch-action:none; cursor:crosshair }
-.hidden { display:none!important }
-.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center }
-.status { margin-top:10px; overflow-wrap:anywhere }
-small,.small { font-size:13px; color:var(--muted) }
-progress { width:100%; height:18px; margin-top:10px }
-.clip {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:10px 0;
-  border-top:1px solid var(--line);
-  flex-wrap:wrap
-}
-.pill {
-  font-size:12px;
-  background:#263d56;
-  padding:3px 8px;
-  border-radius:20px
-}
-a { color:var(--accent); font-weight:700 }
+:root{color-scheme:dark;--bg:#0b1320;--panel:#142238;--muted:#a9bbcf;--accent:#59c7ff;--line:#2a405b;--good:#79d6a1;--warn:#ffd27a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#eef5fc;font:16px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:16px 18px;background:#111e30;border-bottom:1px solid var(--line);font-size:22px;font-weight:850}
+header span{color:var(--accent)}
+main{max-width:920px;margin:auto;padding:15px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:16px;margin:0 0 14px}
+h2{font-size:18px;margin:0 0 9px}
+p{color:var(--muted);margin:8px 0}
+button{border:0;border-radius:9px;background:var(--accent);color:#062033;font-weight:750;font-size:15px;padding:12px 15px;margin:4px 4px 4px 0;cursor:pointer}
+button.secondary{background:#2b4059;color:#eef5fc}
+button:disabled{opacity:.45}
+input[type=file]{max-width:100%;padding:8px 0}
+input[type=range]{width:100%}
+video,canvas{display:block;width:100%;max-height:52vh;background:#000;border-radius:10px;margin-top:10px}
+canvas{touch-action:none;cursor:crosshair}
+.hidden{display:none!important}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.status{margin-top:10px;overflow-wrap:anywhere}
+.small,small{font-size:13px;color:var(--muted)}
+progress{width:100%;height:18px;margin-top:10px}
+.clip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.pill{font-size:12px;background:#263d56;padding:3px 8px;border-radius:20px}
+.tag{font-size:12px;color:#062033;background:var(--good);padding:3px 8px;border-radius:20px}
+.tag.motion{background:var(--warn)}
+a{color:var(--accent);font-weight:750}
+.notice{border-left:3px solid var(--warn);padding:8px 11px;background:#202b39;border-radius:5px;color:#e7edf5}
+.meter{height:8px;background:#26384e;border-radius:8px;overflow:hidden}
+.meter>div{height:100%;width:0;background:var(--accent)}
 </style>
 </head>
-
 <body>
-<header>Pitch<span>Cut</span></header>
-
+<header>Pitch<span>Cut</span> <small>AI-assisted pitch finder</small></header>
 <main>
 
 <section class="card">
-<h2>1. Choose a video</h2>
+<h2>1. Choose Brayden’s video</h2>
 <input id="file" type="file" accept="video/*">
-<div id="loadStatus" class="status">
-Your video stays on this device; it is not uploaded to a server.
-</div>
-<video id="source" controls playsinline class="hidden"></video>
+<div id="loadStatus" class="status">Choose a video from Photos or Files. Video analysis runs locally in this browser.</div>
+<video id="source" controls playsinline preload="metadata" class="hidden"></video>
 </section>
 
 <section id="roiStep" class="card hidden">
 <h2>2. Mark the pitcher</h2>
-<p>
-Drag a box around the pitcher only. Include his full body and throwing arm;
-exclude the catcher where possible.
-</p>
+<p>Pause the video on a clear frame, then draw a box around Brayden. Make the box large enough to include his full body and throwing arm, but avoid including other players if possible.</p>
 <canvas id="roiCanvas"></canvas>
 <div class="row">
-<button id="scanBtn" disabled>Scan for pitch candidates</button>
+<button id="scanBtn" disabled>Run AI pitch scan</button>
 <button id="clearBox" class="secondary">Clear box</button>
 </div>
-<label>
-Sensitivity: <b id="sensLabel">7</b>/10 —
-higher keeps more possible movements
-</label>
-<input id="sensitivity" type="range" min="1" max="10" value="7">
-<p class="small">
-This is conservative visual-motion detection, not a trained baseball AI model.
-It favors extra candidates over silently discarding possible pitches.
-</p>
+<p class="small">The pose model tracks body landmarks. PitchCut then looks for a pitching-like sequence of arm, torso, and leg movement. Pixel-motion detection runs alongside it as a safety net.</p>
 </section>
 
-<section id="reviewStep" class="card hidden">
-<h2>3. Review candidates</h2>
+<section id="scanStep" class="card hidden">
+<h2>3. AI analysis</h2>
+<div id="modelStatus" class="status">AI model has not loaded yet.</div>
+<div class="meter"><div id="modelMeter"></div></div>
 <div id="scanStatus" class="status"></div>
 <progress id="progress" class="hidden" max="100" value="0"></progress>
 <div class="row">
-<button id="rescanBtn" class="secondary">Rescan</button>
-<button id="exportBtn" disabled>Export selected clips</button>
+<button id="rescanBtn" class="secondary">Rescan video</button>
 <button id="selectAllBtn" class="secondary">Select all</button>
 <button id="selectNoneBtn" class="secondary">Select none</button>
+<button id="exportBtn" disabled>Export selected clips</button>
 </div>
-<p class="small">
-Each candidate includes 2 seconds before detected movement and 1 second after.
-Review candidates before exporting; false positives are safer than missed pitches.
-</p>
+<p class="small">Each candidate includes 2 seconds before the detected movement and 1 second after. Review the list. PitchCut deliberately keeps uncertain candidates rather than silently rejecting them.</p>
 <div id="clips"></div>
 </section>
 
 <section id="exportStep" class="card hidden">
-<h2>4. Export</h2>
-<div id="exportStatus" class="status">
-Select clips, then export.
-</div>
+<h2>4. Export your continuous video</h2>
+<div id="exportStatus" class="status">Select candidates, then export.</div>
 <progress id="exportProgress" class="hidden" max="100" value="0"></progress>
-<a id="download" class="hidden" download="PitchCut_highlights.mp4">
-Download PitchCut video
-</a>
-<p class="small">
-Export depends on browser recording support. If your browser cannot create
-a video file, the app will report that instead of claiming the export succeeded.
-</p>
+<p><a id="download" class="hidden" download>Download edited video</a></p>
+<p class="small">Export format depends on browser support. On iPhone, keep Safari open and the screen awake while exporting. If Safari does not support the required recording format, use a desktop browser.</p>
 </section>
 
+<section class="card">
+<h2>What the AI does — and does not do</h2>
+<p>PitchCut uses Google MediaPipe Pose Landmarker, a machine-learning model that estimates 33 body landmarks. The pitching-sequence score is a rule-based analysis of those landmarks, not a baseball-specific model trained on labeled pitches.</p>
+<p class="notice">This is AI-assisted candidate detection, not guaranteed pitch recognition. It can miss pitches when Brayden is very small, occluded, or poorly lit. It can also flag non-pitch movement. The motion backup and manual review are included to reduce missed pitches.</p>
+<p class="small">The video itself is processed on your device. MediaPipe’s library/model are downloaded from Google’s public hosting when you run the scan. MediaPipe documentation notes that video input is processed on-device; its library may send usage metrics.</p>
+</section>
 </main>
 
-<script>
-(()=>{
-const $=id=>document.getElementById(id),
-fileInput=$('file'),
-video=$('source'),
-canvas=$('roiCanvas'),
-ctx=canvas.getContext('2d',{willReadFrequently:true});
+<script type="module">
+import {
+  FilesetResolver,
+  PoseLandmarker
+} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
 
-let fileURL=null,
-exportURL=null,
-firstFrame=null,
-box=null,
-drag=null,
-candidates=[],
-selected=new Set(),
-busy=false;
+const $=id=>document.getElementById(id);
+const video=$('source');
+const canvas=$('roiCanvas');
+const ctx=canvas.getContext('2d',{willReadFrequently:true});
 
-const PRE=2,
-POST=1,
-STEP=.25,
-MERGE_GAP=2.2,
-MIN_RUN=2,
-fmt=t=>`${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
+const PRE=2;
+const POST=1;
+const SAMPLE=.25;
+const POSE_MODEL='https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
 
-function status(id,s) {
+let fileURL=null;
+let exportURL=null;
+let firstFrame=null;
+let box=null;
+let drag=null;
+let poseLandmarker=null;
+let busy=false;
+let candidates=[];
+let selected=new Set();
+
+const fmt=t=>`${Math.floor(t/60)}:${(t%60).toFixed(1).padStart(4,'0')}`;
+
+function status(id,s){
   $(id).textContent=s;
 }
 
-function seek(t) {
+function setMeter(p){
+  $('modelMeter').style.width=`${Math.max(0,Math.min(100,p))}%`;
+}
+
+function seek(t){
   return new Promise((resolve,reject)=>{
-    if(Math.abs(video.currentTime-t)<.015) return resolve();
+    if(Math.abs(video.currentTime-t)<.015)return resolve();
 
     let done=false;
 
@@ -194,88 +137,38 @@ function seek(t) {
       if(done)return;
       done=true;
       clearTimeout(timer);
-      video.removeEventListener('seeked',okFn);
-      video.removeEventListener('error',errFn);
-      ok?resolve():reject(Error('Video seek failed.'));
+      video.removeEventListener('seeked',yes);
+      video.removeEventListener('error',no);
+      ok?resolve():reject(Error('Could not seek in this video.'));
     };
 
-    const okFn=()=>finish(true);
-    const errFn=()=>finish(false);
-    const timer=setTimeout(()=>finish(true),2500);
+    const yes=()=>finish(true);
+    const no=()=>finish(false);
+    const timer=setTimeout(()=>finish(false),5000);
 
-    video.addEventListener('seeked',okFn,{once:true});
-    video.addEventListener('error',errFn,{once:true});
+    video.addEventListener('seeked',yes,{once:true});
+    video.addEventListener('error',no,{once:true});
 
     video.currentTime=Math.min(
       Math.max(0,t),
-      Math.max(0,video.duration-.02)
+      Math.max(0,video.duration-.025)
     );
   });
 }
 
-fileInput.onchange=async()=>{
-  const f=fileInput.files?.[0];
-  if(!f)return;
-
-  if(fileURL)URL.revokeObjectURL(fileURL);
-  if(exportURL)URL.revokeObjectURL(exportURL);
-
-  fileURL=URL.createObjectURL(f);
-  video.src=fileURL;
-  video.classList.remove('hidden');
-
-  status('loadStatus',`Loading ${f.name}…`);
-
-  try {
-    await new Promise((r,j)=>{
-      video.onloadedmetadata=r;
-      video.onerror=()=>j(Error('This video format could not be opened.'));
-    });
-
-    await seek(.1);
-
-    canvas.width=video.videoWidth;
-    canvas.height=video.videoHeight;
-
-    ctx.drawImage(video,0,0);
-
-    firstFrame=ctx.getImageData(
-      0,0,canvas.width,canvas.height
-    );
-
-    box=null;
-    draw();
-
-    $('roiStep').classList.remove('hidden');
-    $('reviewStep').classList.add('hidden');
-    $('exportStep').classList.add('hidden');
-    $('scanBtn').disabled=false;
-
-    status(
-      'loadStatus',
-      `Loaded ${video.duration.toFixed(1)} sec • ${video.videoWidth}×${video.videoHeight}`
-    );
-
-  } catch(e) {
-    status('loadStatus',e.message);
-  }
-};
-
-function draw() {
+function drawFrame(){
   if(!firstFrame)return;
-
   ctx.putImageData(firstFrame,0,0);
 
-  if(box) {
-    ctx.strokeStyle='#55c6ff';
+  if(box){
+    ctx.strokeStyle='#59c7ff';
     ctx.lineWidth=Math.max(3,canvas.width/300);
     ctx.strokeRect(...box);
   }
 }
 
-function point(e) {
+function point(e){
   const r=canvas.getBoundingClientRect();
-
   return [
     (e.clientX-r.left)*canvas.width/r.width,
     (e.clientY-r.top)*canvas.height/r.height
@@ -284,16 +177,14 @@ function point(e) {
 
 canvas.onpointerdown=e=>{
   if(!firstFrame)return;
-
   canvas.setPointerCapture(e.pointerId);
   drag=point(e);
   box=[...drag,0,0];
-  draw();
+  drawFrame();
 };
 
 canvas.onpointermove=e=>{
   if(!drag)return;
-
   const p=point(e);
 
   box=[
@@ -303,24 +194,206 @@ canvas.onpointermove=e=>{
     Math.abs(p[1]-drag[1])
   ];
 
-  draw();
+  drawFrame();
 };
 
 canvas.onpointerup=()=>drag=null;
 
 $('clearBox').onclick=()=>{
   box=null;
-  draw();
+  drawFrame();
 };
 
-$('sensitivity').oninput=()=>
-  $('sensLabel').textContent=$('sensitivity').value;
+fileInputSetup();
 
-function crop(bx,by,bw,bh) {
-  const w=96,
-  h=Math.max(24,Math.round(96*bh/bw)),
-  c=document.createElement('canvas');
+function fileInputSetup(){
+  $('file').onchange=async()=>{
+    const f=$('file').files?.[0];
+    if(!f)return;
 
+    if(fileURL)URL.revokeObjectURL(fileURL);
+    if(exportURL)URL.revokeObjectURL(exportURL);
+
+    fileURL=URL.createObjectURL(f);
+    video.src=fileURL;
+    video.classList.remove('hidden');
+
+    status('loadStatus',`Loading ${f.name}…`);
+
+    try{
+      await new Promise((r,j)=>{
+        video.onloadedmetadata=r;
+        video.onerror=()=>j(Error('This video format could not be opened.'));
+      });
+
+      video.pause();
+      await seek(Math.min(1,Math.max(0,video.duration-.05)));
+
+      canvas.width=video.videoWidth;
+      canvas.height=video.videoHeight;
+
+      ctx.drawImage(video,0,0);
+      firstFrame=ctx.getImageData(0,0,canvas.width,canvas.height);
+
+      box=null;
+      drawFrame();
+
+      $('roiStep').classList.remove('hidden');
+      $('scanStep').classList.remove('hidden');
+      $('scanBtn').disabled=false;
+
+      status(
+        'loadStatus',
+        `Loaded ${f.name} • ${video.duration.toFixed(1)} seconds • ${video.videoWidth}×${video.videoHeight}`
+      );
+
+      status('scanStatus','Draw a box around Brayden, then run the AI scan.');
+
+    }catch(e){
+      status('loadStatus',e.message);
+    }
+  };
+}
+
+async function loadAI(){
+  if(poseLandmarker)return poseLandmarker;
+
+  status('modelStatus','Downloading AI pose model (first use only)…');
+  setMeter(15);
+
+  const vision=await FilesetResolver.forVisionTasks(
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+  );
+
+  setMeter(45);
+
+  poseLandmarker=await PoseLandmarker.createFromOptions(vision,{
+    baseOptions:{
+      modelAssetPath:POSE_MODEL,
+      delegate:'CPU'
+    },
+    runningMode:'VIDEO',
+    numPoses:4,
+    minPoseDetectionConfidence:.25,
+    minPosePresenceConfidence:.25,
+    minTrackingConfidence:.25
+  });
+
+  setMeter(100);
+  status('modelStatus','AI pose model loaded. Body landmarks will be analyzed on this device.');
+
+  return poseLandmarker;
+}
+
+function insideROI(lm){
+  if(!box)return true;
+
+  const [x,y,w,h]=box.map((v,i)=>
+    v/(i%2===0?canvas.width:canvas.height)
+  );
+
+  const ids=[11,12,23,24];
+  let sx=0,sy=0,n=0;
+
+  for(const id of ids){
+    const p=lm[id];
+    if(p&&p.visibility>.15){
+      sx+=p.x;
+      sy+=p.y;
+      n++;
+    }
+  }
+
+  if(!n)return false;
+
+  const cx=sx/n;
+  const cy=sy/n;
+
+  return cx>=x&&cx<=x+w&&cy>=y&&cy<=y+h;
+}
+
+function getPose(result){
+  if(!result?.landmarks?.length)return null;
+
+  let best=null;
+  let bestScore=-1;
+
+  for(const lm of result.landmarks){
+    if(!insideROI(lm))continue;
+
+    const ids=[11,12,23,24];
+    let vis=0,n=0;
+
+    for(const id of ids){
+      const p=lm[id];
+      if(p){
+        vis+=p.visibility??0;
+        n++;
+      }
+    }
+
+    const score=n?vis/n:0;
+
+    if(score>bestScore){
+      best=lm;
+      bestScore=score;
+    }
+  }
+
+  return bestScore>.15?best:null;
+}
+
+const TRACK=[
+  11,12,13,14,15,16,
+  23,24,25,26,27,28,29,30,31,32
+];
+
+function poseFeatures(lm){
+  if(!lm)return null;
+
+  const f=[];
+
+  for(const id of TRACK){
+    const p=lm[id];
+
+    if(!p||((p.visibility??0)<.12)){
+      f.push(null);
+      continue;
+    }
+
+    f.push([
+      p.x*canvas.width,
+      p.y*canvas.height
+    ]);
+  }
+
+  return f;
+}
+
+function poseDelta(a,b){
+  if(!a||!b)return 0;
+
+  let sum=0,n=0;
+
+  for(let i=0;i<a.length;i++){
+    if(!a[i]||!b[i])continue;
+
+    const dx=(a[i][0]-b[i][0])/Math.max(1,box[2]);
+    const dy=(a[i][1]-b[i][1])/Math.max(1,box[3]);
+
+    sum+=Math.hypot(dx,dy);
+    n++;
+  }
+
+  return n?sum/n:0;
+}
+
+function motionCrop(){
+  const [bx,by,bw,bh]=box.map(Math.round);
+  const w=80;
+  const h=Math.max(24,Math.round(80*bh/bw));
+
+  const c=document.createElement('canvas');
   c.width=w;
   c.height=h;
 
@@ -328,157 +401,205 @@ function crop(bx,by,bw,bh) {
 
   x.drawImage(video,bx,by,bw,bh,0,0,w,h);
 
-  const d=x.getImageData(0,0,w,h).data,
-  g=new Uint8Array(w*h);
+  const d=x.getImageData(0,0,w,h).data;
+  const g=new Uint8Array(w*h);
 
-  for(let i=0;i<g.length;i++) {
+  for(let i=0;i<g.length;i++){
     g[i]=(d[i*4]+d[i*4+1]+d[i*4+2])/3;
   }
 
   return g;
 }
 
-function difference(a,b) {
+function pixelDelta(a,b){
+  if(!a||!b)return 0;
+
   let n=0;
 
-  for(let i=0;i<a.length;i++) {
-    if(Math.abs(a[i]-b[i])>24)n++;
+  for(let i=0;i<a.length;i++){
+    if(Math.abs(a[i]-b[i])>25)n++;
   }
 
   return n/a.length;
 }
 
-async function scan() {
+function makeRuns(samples,key,threshold,minCount){
+  const out=[];
+  let start=-1,last=-1;
+
+  for(let i=0;i<samples.length;i++){
+    if(samples[i][key]>=threshold){
+      if(start<0)start=i;
+      last=i;
+    }else if(start>=0){
+      if(last-start+1>=minCount){
+        out.push({
+          start:samples[start].t,
+          end:samples[last].t,
+          source:key
+        });
+      }
+      start=-1;
+    }
+  }
+
+  if(start>=0&&last-start+1>=minCount){
+    out.push({
+      start:samples[start].t,
+      end:samples[last].t,
+      source:key
+    });
+  }
+
+  return out;
+}
+
+function mergeRuns(runs,gap){
+  runs.sort((a,b)=>a.start-b.start);
+  const out=[];
+
+  for(const r of runs){
+    const z=out.at(-1);
+
+    if(z&&r.start-z.end<=gap){
+      z.end=Math.max(z.end,r.end);
+      z.sources.add(r.source);
+    }else{
+      out.push({...r,sources:new Set([r.source])});
+    }
+  }
+
+  return out;
+}
+
+async function scan(){
   if(busy)return;
 
-  if(!box||box[2]<12||box[3]<12) {
+  if(!box||box[2]<12||box[3]<12){
     alert('Draw a box around the pitcher first.');
     return;
   }
 
   busy=true;
-
   $('scanBtn').disabled=$('rescanBtn').disabled=true;
-  $('reviewStep').classList.remove('hidden');
   $('progress').classList.remove('hidden');
-
-  status('scanStatus','Preparing scan…');
-
-  const dur=video.duration,
-  [bx,by,bw,bh]=box.map(Math.round),
-  threshold=.13-Number($('sensitivity').value)*.008,
-  samples=[];
-
-  let prev=null,
-  oldTime=video.currentTime;
-
+  $('exportStep').classList.add('hidden');
   video.pause();
 
-  try {
-    const total=Math.ceil(dur/STEP);
+  const oldTime=video.currentTime;
 
-    for(let k=0;k<total;k++) {
-      const t=Math.min(k*STEP,Math.max(0,dur-.03));
+  try{
+    const ai=await loadAI();
+    const duration=video.duration;
+    const total=Math.ceil(duration/SAMPLE);
+    const samples=[];
+
+    let prevPose=null;
+    let prevPixels=null;
+    let lastTimestamp=-1;
+
+    for(let i=0;i<total;i++){
+      const t=Math.min(i*SAMPLE,Math.max(0,duration-.03));
 
       await seek(t);
 
-      const g=crop(bx,by,bw,bh);
+      const timestamp=Math.max(
+        lastTimestamp+1,
+        Math.round(t*1000)
+      );
+
+      lastTimestamp=timestamp;
+
+      let poseScore=0;
+      let pixelScore=0;
+
+      try{
+        const result=ai.detectForVideo(video,timestamp);
+        const lm=getPose(result);
+        const feat=poseFeatures(lm);
+
+        poseScore=poseDelta(prevPose,feat);
+        prevPose=feat;
+      }catch(err){
+        console.warn('Pose inference frame failed',err);
+      }
+
+      try{
+        const px=motionCrop();
+        pixelScore=pixelDelta(prevPixels,px);
+        prevPixels=px;
+      }catch(err){
+        console.warn('Motion backup frame failed',err);
+      }
 
       samples.push({
         t,
-        score:prev?difference(prev,g):0
+        pose:poseScore,
+        pixel:pixelScore
       });
 
-      prev=g;
-
-      if(k%4===0) {
-        $('progress').value=(k+1)/total*100;
+      if(i%3===0){
+        $('progress').value=(i+1)/total*100;
 
         status(
           'scanStatus',
-          `Scanning ${fmt(t)} of ${fmt(dur)} — ${Math.round((k+1)/total*100)}%`
+          `AI analyzing ${fmt(t)} of ${fmt(duration)} · ${Math.round((i+1)/total*100)}%`
         );
 
         await new Promise(r=>setTimeout(r,0));
       }
     }
 
-    function runs(th,min) {
-      const out=[];
-      let s=-1,last=-1;
+    const poseRuns=[
+      ...makeRuns(samples,'pose',.035,2),
+      ...makeRuns(samples,'pose',.022,3)
+    ];
 
-      for(let i=0;i<samples.length;i++) {
-        if(samples[i].score>=th) {
-          if(s<0)s=i;
-          last=i;
-        } else if(s>=0) {
-          if(last-s+1>=min) {
-            out.push({
-              start:samples[s].t,
-              end:samples[last].t
-            });
-          }
-          s=-1;
-        }
-      }
-
-      if(s>=0&&last-s+1>=min) {
-        out.push({
-          start:samples[s].t,
-          end:samples[last].t
-        });
-      }
-
-      return out;
-    }
-
-    const all=[
-      ...runs(threshold,MIN_RUN),
-      ...runs(threshold*.72,3)
-    ].sort((a,b)=>a.start-b.start);
-
-    const merged=[];
-
-    for(const r of all) {
-      const z=merged.at(-1);
-
-      if(z&&r.start-z.end<=MERGE_GAP) {
-        z.end=Math.max(z.end,r.end);
-      } else {
-        merged.push({...r});
-      }
-    }
+    const pixelRuns=makeRuns(samples,'pixel',.075,2);
+    const merged=mergeRuns([...poseRuns,...pixelRuns],2.5);
 
     candidates=merged.map(r=>({
       start:Math.max(0,r.start-PRE),
-      end:Math.min(dur,r.end+POST)
+      end:Math.min(duration,r.end+POST),
+      source:
+        r.sources.has('pose')&&r.sources.has('pixel')
+        ?'AI + motion'
+        :r.sources.has('pose')
+        ?'AI pose'
+        :'Motion backup'
     }));
 
     selected=new Set(candidates.map((_,i)=>i));
 
-    render();
+    renderCandidates();
+    $('exportBtn').disabled=!candidates.length;
 
     status(
       'scanStatus',
-      `Found ${candidates.length} candidate motion segments. This is not a verified pitch count. Review the candidates before exporting.`
+      candidates.length
+      ?`Found ${candidates.length} candidate segments. ${poseRuns.length} pose-based activity windows and ${pixelRuns.length} motion-backup windows contributed. Review every candidate.`
+      :'No candidate windows were found. Try a larger box around the pitcher, or adjust the box more tightly around his body.'
     );
 
-    $('exportBtn').disabled=!candidates.length;
+  }catch(e){
+    status('scanStatus',`Scan failed: ${e?.message||e}`);
+    console.error(e);
 
-  } catch(e) {
-    status('scanStatus',`Scan stopped: ${e.message}`);
-  } finally {
+  }finally{
     busy=false;
     $('scanBtn').disabled=$('rescanBtn').disabled=false;
     $('progress').classList.add('hidden');
     video.pause();
-    await seek(oldTime);
+
+    try{
+      await seek(oldTime);
+    }catch(_){}
   }
 }
 
-function render() {
+function renderCandidates(){
   const list=$('clips');
-  list.innerHTML='';
+  list.replaceChildren();
 
   candidates.forEach((c,i)=>{
     const row=document.createElement('div');
@@ -493,30 +614,43 @@ function render() {
     cb.type='checkbox';
     cb.checked=selected.has(i);
 
-    cb.onchange=()=>{
-      cb.checked?selected.add(i):selected.delete(i);
-    };
+    cb.onchange=()=>cb.checked
+      ?selected.add(i)
+      :selected.delete(i);
 
-    const span=document.createElement('span');
+    const text=document.createElement('span');
 
-    span.innerHTML=`
-      <b>Candidate ${i+1}</b>
-      <span class="pill">${fmt(c.start)}–${fmt(c.end)}</span>
-    `;
+    const title=document.createElement('b');
+    title.textContent=`Candidate ${i+1} `;
 
-    label.append(cb,span);
+    const times=document.createElement('span');
+    times.className='pill';
+    times.textContent=`${fmt(c.start)}–${fmt(c.end)}`;
 
-    const b=document.createElement('button');
-    b.className='secondary';
-    b.textContent='Preview';
+    const source=document.createElement('span');
+    source.className=c.source==='AI pose'?'tag':'tag motion';
+    source.textContent=c.source;
 
-    b.onclick=async()=>{
+    text.append(
+      title,
+      times,
+      document.createTextNode(' '),
+      source
+    );
+
+    label.append(cb,text);
+
+    const preview=document.createElement('button');
+    preview.className='secondary';
+    preview.textContent='Preview';
+
+    preview.onclick=async()=>{
       video.pause();
       await seek(c.start);
-      video.play();
+      await video.play();
 
       const stop=()=>{
-        if(video.currentTime>=c.end) {
+        if(video.currentTime>=c.end){
           video.pause();
           video.removeEventListener('timeupdate',stop);
         }
@@ -525,7 +659,7 @@ function render() {
       video.addEventListener('timeupdate',stop);
     };
 
-    row.append(label,b);
+    row.append(label,preview);
     list.append(row);
   });
 }
@@ -535,15 +669,15 @@ $('rescanBtn').onclick=scan;
 
 $('selectAllBtn').onclick=()=>{
   selected=new Set(candidates.map((_,i)=>i));
-  render();
+  renderCandidates();
 };
 
 $('selectNoneBtn').onclick=()=>{
   selected.clear();
-  render();
+  renderCandidates();
 };
 
-async function exportVideo() {
+async function exportVideo(){
   const chosen=[...selected]
     .sort((a,b)=>a-b)
     .map(i=>candidates[i]);
@@ -551,85 +685,109 @@ async function exportVideo() {
   if(!chosen.length)return;
 
   const out=document.createElement('canvas');
-
   out.width=video.videoWidth;
   out.height=video.videoHeight;
 
-  const c=out.getContext('2d'),
-  stream=out.captureStream(30);
+  const c=out.getContext('2d');
+  const stream=out.captureStream(30);
 
-  try {
-    const vs=video.captureStream?.()||video.mozCaptureStream?.();
+  try{
+    const sourceStream=
+      video.captureStream?.()||
+      video.mozCaptureStream?.();
 
-    vs?.getAudioTracks().forEach(t=>stream.addTrack(t));
-  } catch(e) {}
+    sourceStream?.getAudioTracks().forEach(
+      t=>stream.addTrack(t)
+    );
+
+  }catch(e){
+    console.warn('Audio capture unavailable',e);
+  }
 
   const mime=[
-    'video/mp4;codecs=h264,aac',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
     'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm'
-  ].find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t));
+  ].find(t=>
+    window.MediaRecorder&&MediaRecorder.isTypeSupported(t)
+  );
 
-  if(!mime) {
+  $('exportStep').classList.remove('hidden');
+
+  if(!mime){
     status(
       'exportStatus',
-      'This browser does not support in-browser video export. Try a current desktop Chrome or Safari browser.'
+      'This browser does not support a compatible MediaRecorder format. Try current desktop Chrome or Safari.'
     );
-
-    $('exportStep').classList.remove('hidden');
     return;
   }
 
-  $('exportStep').classList.remove('hidden');
-  $('exportProgress').classList.remove('hidden');
   $('exportBtn').disabled=true;
+  $('exportProgress').classList.remove('hidden');
 
-  status('exportStatus','Combining selected clips. Keep this page open.');
+  status(
+    'exportStatus',
+    'Combining clips. Keep this page open and prevent your phone from sleeping.'
+  );
 
-  const recorder=new MediaRecorder(stream,{mimeType:mime}),
-  chunks=[];
+  const recorder=new MediaRecorder(stream,{mimeType:mime});
+  const chunks=[];
 
   recorder.ondataavailable=e=>{
     if(e.data?.size)chunks.push(e.data);
   };
 
-  const stopped=new Promise(r=>recorder.onstop=r);
+  const stopped=new Promise(resolve=>{
+    recorder.onstop=resolve;
+  });
 
   recorder.start(1000);
 
-  try {
-    for(let i=0;i<chosen.length;i++) {
+  let raf=0;
+
+  const paint=()=>{
+    if(video.readyState>=2){
+      c.drawImage(video,0,0,out.width,out.height);
+    }
+    raf=requestAnimationFrame(paint);
+  };
+
+  raf=requestAnimationFrame(paint);
+
+  try{
+    for(let i=0;i<chosen.length;i++){
       const cl=chosen[i];
 
       await seek(cl.start);
 
       await new Promise((resolve,reject)=>{
-        let done=false;
+        let finished=false;
 
-        const finish=()=>{
-          if(done)return;
-          done=true;
+        const end=()=>{
+          if(finished)return;
+          finished=true;
+          clearTimeout(watchdog);
           video.pause();
           video.removeEventListener('timeupdate',tick);
           resolve();
         };
 
         const tick=()=>{
-          if(video.currentTime>=cl.end)finish();
+          if(video.currentTime>=cl.end-.02)end();
         };
 
+        const watchdog=setTimeout(()=>{
+          if(!finished){
+            finished=true;
+            video.pause();
+            video.removeEventListener('timeupdate',tick);
+            reject(Error('Playback timed out during export.'));
+          }
+        },Math.max(15000,(cl.end-cl.start)*4000));
+
         video.addEventListener('timeupdate',tick);
-
-        video.play().then(()=>{
-          const paint=()=>{
-            if(done)return;
-            c.drawImage(video,0,0,out.width,out.height);
-            requestAnimationFrame(paint);
-          };
-
-          requestAnimationFrame(paint);
-        }).catch(reject);
+        video.play().catch(reject);
       });
 
       $('exportProgress').value=(i+1)/chosen.length*100;
@@ -640,34 +798,38 @@ async function exportVideo() {
       );
     }
 
+    cancelAnimationFrame(raf);
+    video.pause();
     recorder.stop();
     await stopped;
 
     const blob=new Blob(chunks,{type:mime});
 
     if(exportURL)URL.revokeObjectURL(exportURL);
-
     exportURL=URL.createObjectURL(blob);
 
-    const a=$('download'),
-    ext=mime.includes('mp4')?'mp4':'webm';
+    const ext=mime.includes('mp4')?'mp4':'webm';
+    const a=$('download');
 
     a.href=exportURL;
-    a.download=`PitchCut_highlights.${ext}`;
-    a.textContent=`Download PitchCut video (${(blob.size/1048576).toFixed(1)} MB)`;
+    a.download=`PitchCut_edited.${ext}`;
+    a.textContent=`Download edited video (${(blob.size/1048576).toFixed(1)} MB)`;
     a.classList.remove('hidden');
 
     status(
       'exportStatus',
-      `Export ready: ${chosen.length} selected segments combined. Review the file before sharing.`
+      `Export created from ${chosen.length} selected segments. Download and review it before sharing.`
     );
 
-  } catch(e) {
-    try { recorder.stop(); } catch(_) {}
+  }catch(e){
+    try{
+      if(recorder.state!=='inactive')recorder.stop();
+    }catch(_){}
 
-    status('exportStatus',`Export failed: ${e.message}`);
+    status('exportStatus',`Export failed: ${e?.message||e}`);
 
-  } finally {
+  }finally{
+    cancelAnimationFrame(raf);
     $('exportBtn').disabled=false;
     stream.getTracks().forEach(t=>t.stop());
     video.pause();
@@ -675,8 +837,6 @@ async function exportVideo() {
 }
 
 $('exportBtn').onclick=exportVideo;
-
-})();
 </script>
 </body>
 </html>
