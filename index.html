@@ -20,6 +20,7 @@
   label { display: block; margin-top: 10px; }
   input[type=range] { width: 100%; }
   progress { width: 100%; height: 18px; }
+  .small { font-size: 14px; color: #9fb3c8; }
 </style>
 </head>
 <body>
@@ -33,9 +34,10 @@
   </div>
 
   <div class="card hidden" id="step2">
-    <h3>2. Drag a box around the pitcher</h3>
+    <h3>2. Drag a box around the pitcher only</h3>
+    <div class="small">Draw it tight: from above his head to just below his feet. Leave out the catcher.</div>
     <canvas id="cv"></canvas>
-    <label>Sensitivity (more sensitive catches more, including extras)
+    <label>Sensitivity (higher catches more, including extras)
       <input type="range" id="sens" min="1" max="10" value="7">
     </label>
     <button onclick="findPitches()">Find pitches</button>
@@ -72,14 +74,19 @@
 </div>
 
 <script>
-const PRE = 2.0, POST = 1.0, MERGE_GAP = 4.0, FPS = 30;
+// ---- Settings you can change ----
+const PRE = 2.0;          // seconds kept before the pitch starts
+const POST = 1.0;         // seconds kept after the last motion of the pitch
+const LOCKOUT = 8.0;      // seconds to ignore motion after a pitch (covers the return throw)
+const GROUP_GAP = 1.5;    // motion closer together than this counts as one pitch
+const FPS = 30;
+// ---------------------------------
 const fileInput = document.getElementById('file');
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const player = document.getElementById('player');
 let url = null, box = null, dragStart = null;
 let clips = [], cur = 0, loop = false, reel = false;
 
-// Loads a video in a way that works on iPhone Safari.
 function makeVideo(src) {
   return new Promise((resolve, reject) => {
     const v = document.createElement('video');
@@ -97,7 +104,7 @@ function makeVideo(src) {
     v.addEventListener('error', () => { if (!finished) { finished = true; reject(new Error('This video could not be opened.')); } }, { once: true });
     v.src = src;
     v.load();
-    const p = v.play();             // nudges iPhone Safari to actually load the video
+    const p = v.play();
     if (p && p.catch) p.catch(() => {});
     setTimeout(() => { if (!finished) { finished = true; reject(new Error('Timed out loading the video.')); } }, 30000);
   });
@@ -109,7 +116,7 @@ function seek(v, t) {
     const fin = () => { if (!done) { done = true; v.removeEventListener('seeked', fin); res(); } };
     v.addEventListener('seeked', fin);
     v.currentTime = t;
-    setTimeout(fin, 3000);          // never get stuck on one frame
+    setTimeout(fin, 3000);
   });
 }
 
@@ -158,8 +165,8 @@ function up() { dragStart = null; }
 async function findPitches() {
   if (!box || box[2] < 10) { alert('Drag a box around the pitcher first.'); return; }
   const sens = parseInt(document.getElementById('sens').value);
-  const threshold = 0.09 - sens * 0.008;   // fraction of changed pixels in the box
-  const minRun = 2;                         // samples in a row above threshold
+  const threshold = 0.10 - sens * 0.007;   // fraction of changed pixels in the box
+  const minRun = 3;                         // samples in a row above threshold (about 0.3 seconds)
   const STEP = 1 / 10;                      // sample 10 times per second
   const msg = document.getElementById('msg');
   const prog = document.getElementById('prog');
@@ -174,35 +181,55 @@ async function findPitches() {
   const sctx = small.getContext('2d', { willReadFrequently: true });
 
   prog.classList.remove('hidden'); prog.max = dur;
-  const hits = []; let prev = null, run = 0;
+
+  // Pass 1: record how much changed in the box at every sample
+  const times = [], levels = [];
+  let prev = null;
   for (let t = 0; t < dur; t += STEP) {
     await seek(v, t);
     sctx.drawImage(v, bx, by, bw, bh, 0, 0, W, H);
     const d = sctx.getImageData(0, 0, W, H).data;
     const gray = new Uint8Array(W * H);
     for (let i = 0; i < gray.length; i++) gray[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
+    let level = 0;
     if (prev) {
       let changed = 0;
       for (let i = 0; i < gray.length; i++) if (Math.abs(gray[i] - prev[i]) > 25) changed++;
-      if (changed / gray.length > threshold) { run++; if (run === minRun) hits.push(t); } else run = 0;
+      level = changed / gray.length;
     }
+    times.push(t); levels.push(level);
     prev = gray;
     prog.value = t;
     msg.textContent = `Scanning... ${Math.round(t / dur * 100)}%  (keep this screen open)`;
   }
   v.remove();
 
-  const groups = [];
-  hits.forEach(t => {
-    if (groups.length && t - groups[groups.length - 1].slice(-1)[0] <= MERGE_GAP) groups[groups.length - 1].push(t);
-    else groups.push([t]);
-  });
-  clips = [];
-  groups.forEach(g => {
-    const s = Math.max(0, g[0] - PRE), e = Math.min(dur, g[g.length - 1] + POST);
-    if (clips.length && s <= clips[clips.length - 1].end) clips[clips.length - 1].end = Math.max(clips[clips.length - 1].end, e);
-    else clips.push({ start: s, end: e });
-  });
+  // Pass 2: find stretches of sustained motion, with a lockout after each pitch
+  const pitches = [];   // {start, end} of the motion itself
+  let i = 0;
+  while (i < times.length) {
+    if (levels[i] > threshold) {
+      let j = i;
+      while (j < times.length && levels[j] > threshold) j++;
+      const runLen = j - i;
+      if (runLen >= minRun) {
+        const last = pitches[pitches.length - 1];
+        if (last && times[i] - last.end <= GROUP_GAP) {
+          last.end = times[j - 1];                 // same pitch, extend it
+        } else if (!last || times[i] - last.end >= LOCKOUT) {
+          pitches.push({ start: times[i], end: times[j - 1] });
+        }                                          // else: inside the lockout, ignore
+      }
+      i = j;
+    } else {
+      i++;
+    }
+  }
+
+  clips = pitches.map(p => ({
+    start: Math.max(0, p.start - PRE),
+    end: Math.min(dur, p.end + POST)
+  }));
 
   msg.textContent = `Done. Found ${clips.length} pitches.`;
   prog.classList.add('hidden');
@@ -215,7 +242,7 @@ function showClips() {
   const list = document.getElementById('clipList'); list.innerHTML = '';
   clips.forEach((c, i) => {
     const b = document.createElement('button'); b.className = 'alt';
-    b.textContent = `Pitch ${i + 1}  (at ${c.start.toFixed(1)}s)`;
+    b.textContent = `Pitch ${i + 1}  (${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s)`;
     b.onclick = () => gotoClip(i); list.appendChild(b);
   });
   player.src = url;
