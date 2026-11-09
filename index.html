@@ -76,7 +76,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v5.2</div>
+  <div class="ver">v5.3</div>
 </header>
 
 <div class="wrap">
@@ -195,7 +195,9 @@ const CATCH_BEFORE = 1.8;     // how far before a moment to look for the catcher
 const CATCH_AFTER_MIN = 0.2;  // a real pitch jolts the catcher's mitt this long after the throw
 const CATCH_AFTER_MAX = 2.0;  // look this long after the throw for the mitt jolt
 const CATCH_CONFIRM = 0.5;    // with a catcher box, a pitch must jolt the catcher at least this fraction of the motion bar
-const CATCH_OVER_QUIET = 2.0; // and at least this many times his normal (quiet) movement
+const CATCH_OVER_QUIET = 2.0;
+const KICK_MIN = 0.12;        // a pitch needs a leg lift: knee rises at least this much (fraction of his height) in the 2.5s before the throw
+const STRIDE_MIN = 0.25;      // ...or a stride: feet spread at least this much wider than normal at the throw // and at least this many times his normal (quiet) movement
 const CATCH_MIN = 0.8;        // catcher motion before the moment must reach this fraction of the motion bar to count
 const CATCH_RATIO = 1.25;     // and be this many times stronger than the catcher motion after the moment
 const AI_MODEL = 'full';      // 'full' = more accurate for a small, far-away pitcher (slower); 'lite' = faster
@@ -458,7 +460,7 @@ function catcherCheck(cm, release, threshold) {
   const movedFirst = before >= threshold * CATCH_MIN && before > after * CATCH_RATIO;
   const jolt = after >= threshold * CATCH_CONFIRM && after >= quiet * CATCH_OVER_QUIET;
   const why = movedFirst ? 'catcher moved first (throw back)' : (!jolt ? 'no mitt jolt after' : 'mitt jolt');
-  return { before, after, afterT, quiet, ok: !movedFirst && jolt, why };
+  return { before, after, afterT, quiet, ok: jolt, why: jolt ? 'mitt jolt' : 'no mitt jolt after' };
 }
 
 // ---------- Detector 2: AI pose (throwing arm speed) ----------
@@ -508,8 +510,17 @@ async function poseScan(v, dur, setMsg) {
         const vis = [p[15].visibility == null ? 1 : p[15].visibility, p[16].visibility == null ? 1 : p[16].visibility];
         let body = Math.max(p[27].y, p[28].y) - p[0].y;
         if (!(body > 0.3)) body = ((p[23].y + p[24].y) / 2 - p[0].y) * 1.8;
-        if (body > 0.2) r = { t: x, ok: true, vis, body: body * crop.height,
-          wr: [{ x: p[15].x * crop.width, y: p[15].y * crop.height }, { x: p[16].x * crop.width, y: p[16].y * crop.height }] };
+        if (body > 0.2) {
+          r = { t: x, ok: true, vis, body: body * crop.height,
+            wr: [{ x: p[15].x * crop.width, y: p[15].y * crop.height }, { x: p[16].x * crop.width, y: p[16].y * crop.height }] };
+          const vv = i => p[i].visibility == null ? 1 : p[i].visibility;
+          if (vv(25) > 0.3 && vv(26) > 0.3 && vv(27) > 0.3 && vv(28) > 0.3) {
+            const hipY = (p[23].y + p[24].y) / 2;
+            const lift = Math.max(hipY - p[25].y, hipY - p[26].y) / body;
+            const stride = Math.abs(p[27].x - p[28].x) * crop.width / (body * crop.height);
+            r.leg = { lift, stride };
+          }
+        }
       }
     } catch (e) {}
     rec.push(r);
@@ -529,7 +540,25 @@ async function poseScan(v, dur, setMsg) {
   }
   const arm = p90(sp[0]) >= p90(sp[1]) ? 0 : 1;
   const seen = rec.filter(r => r.ok).length / Math.max(1, rec.length);
-  return { t: rec.map(r => r.t), s: sp[arm], seen };
+  const legs = rec.map(r => r.leg || null);
+  const med = a => { const b = a.filter(x => x != null).sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : 0; };
+  return { t: rec.map(r => r.t), s: sp[arm], seen, legs,
+    liftBase: med(legs.map(g => g && g.lift)), strideBase: med(legs.map(g => g && g.stride)) };
+}
+// A real pitch has a leg lift before the throw and/or a big stride at the throw. Catching a throw back has neither.
+function legCheck(pose, release) {
+  if (!pose || !pose.legs) return null;
+  let kick = -1, stride = -1, n = 0;
+  for (let i = 0; i < pose.t.length; i++) {
+    const d = pose.t[i] - release, g = pose.legs[i];
+    if (!g || d < -2.5 || d > 0.6) continue;
+    n++;
+    if (d <= 0) kick = Math.max(kick, g.lift - pose.liftBase);
+    if (d >= -0.4) stride = Math.max(stride, g.stride - pose.strideBase);
+  }
+  if (n < 4) return { kick, stride, ok: true, why: 'legs not visible, not judged' };
+  const ok = kick >= KICK_MIN || stride >= STRIDE_MIN;
+  return { kick, stride, ok, why: ok ? 'leg lift/stride' : 'no leg lift or stride' };
 }
 // One event per burst of arm speed; the burst's fastest moment is the release.
 function poseEvents(series, cutoff) {
@@ -589,13 +618,8 @@ function aiPitches(pose, cutoff, motion, threshold) {
     e.srcs = ['pose'];
     if (mEv.some(m => Math.abs(m.time - e.time) <= MERGE_WINDOW)) e.srcs.push('motion');
   });
-  const spaced = [];
-  for (const e of [...ev].sort((a, b) => b.score - a.score)) {
-    if (spaced.some(k => Math.abs(k.time - e.time) < LOCKOUT)) continue;
-    spaced.push(e);
-  }
-  spaced.sort((a, b) => a.time - b.time);
-  return { kept: spaced, considered: spaced };
+  ev.sort((a, b) => a.time - b.time);
+  return { kept: ev, considered: ev };
 }
 
 // ---------- Debug graph ----------
@@ -707,15 +731,27 @@ async function findPitches() {
     combined = combine(cands, strict, !!(motion && pose));
   }
   const considered = combined.considered;
-  // drop moments where the catcher moved first (a throw back to the pitcher)
-  const checks = combined.kept.map(k => catcherMotion ? catcherCheck(catcherMotion, k.time, threshold) : null);
-  const kept = combined.kept.filter((k, i) => !checks[i] || checks[i].ok);
-  const catchTxt = catcherMotion ? combined.kept.map((k, i) => k.time.toFixed(1) + 's: before=' + checks[i].before.toFixed(3) + ' after=' + checks[i].after.toFixed(3) + ' quiet=' + checks[i].quiet.toFixed(3) + (checks[i].ok ? ' KEPT' : ' DROPPED, ' + checks[i].why)).join('  |  ') : '';
-  clips = kept.map(k => {
-    const i = combined.kept.indexOf(k);
-    let endAt = motionEnd(motion, k.time, threshold);
-    if (checks[i] && checks[i].afterT != null) endAt = Math.max(endAt, checks[i].afterT);   // always show the ball reaching the mitt
-    return makeClip(k.time, findWindupStart(motion, k.time, threshold), k.srcs, endAt);
+  // check every candidate: the catcher's mitt must jolt after it, and Braden's legs must show a pitching motion
+  const judged = combined.kept.map(k => {
+    const c = catcherMotion ? catcherCheck(catcherMotion, k.time, threshold) : null;
+    const g = pose ? legCheck(pose, k.time) : null;
+    return { k, c, g, ok: (!c || c.ok) && (!g || g.ok) };
+  });
+  const keptJ = [];
+  for (const j of judged.filter(j => j.ok).sort((a, b) => b.k.score - a.k.score)) {
+    if (keptJ.some(x => Math.abs(x.k.time - j.k.time) < LOCKOUT)) continue;
+    keptJ.push(j);
+  }
+  keptJ.sort((a, b) => a.k.time - b.k.time);
+  const kept = keptJ.map(j => j.k);
+  const checkTxt = judged.map(j => j.k.time.toFixed(1) + 's: '
+    + (j.g ? 'kick=' + j.g.kick.toFixed(2) + ' stride=' + j.g.stride.toFixed(2) + ' ' : '')
+    + (j.c ? 'mitt after=' + j.c.after.toFixed(3) + ' quiet=' + j.c.quiet.toFixed(3) + ' ' : '')
+    + (keptJ.includes(j) ? 'KEPT' : 'DROPPED, ' + (!j.ok ? [j.g && !j.g.ok ? j.g.why : '', j.c && !j.c.ok ? j.c.why : ''].filter(Boolean).join(' + ') : 'too close to a stronger one'))).join('  |  ');
+  clips = keptJ.map(j => {
+    let endAt = motionEnd(motion, j.k.time, threshold);
+    if (j.c && j.c.afterT != null) endAt = Math.max(endAt, j.c.afterT);   // always show the ball reaching the mitt
+    return makeClip(j.k.time, findWindupStart(motion, j.k.time, threshold), j.k.srcs, endAt);
   });
   if (!catcherMotion) note += ' Tip: draw a second box around the catcher (Box: catcher) so PitchCut can throw out fakes.';
   drawDebug(dur, motion, pose, bar, threshold, kept, considered, pose ? pose.seen : 0);
@@ -725,7 +761,7 @@ async function findPitches() {
     let ai = 0; if (pose) pose.t.forEach((tt, j) => { if (Math.abs(tt - c.release) < 0.15) ai = Math.max(ai, pose.s[j]); });
     return '#' + (i + 1) + ' at ' + c.release.toFixed(1) + 's, AI ' + ai.toFixed(1) + ', windup ' + (c.release - w).toFixed(1) + 's, motion after ' + (me - c.release).toFixed(1) + 's';
   }).join('  |  ');
-  if (catchTxt && $('peaks')) $('peaks').textContent += '\nCatcher check (catcher motion before and after each moment; counts as moved first at about ' + (threshold * CATCH_MIN).toFixed(3) + ' or more): ' + catchTxt;
+  if ($('peaks')) $('peaks').textContent += '\nChecks (leg lift needs ' + KICK_MIN + ' or stride ' + STRIDE_MIN + (catcherMotion ? '; mitt needs ' + Math.max(threshold * CATCH_CONFIRM, 0).toFixed(3) + ' and 2x quiet' : '') + '): ' + checkTxt;
   $('msg').textContent = `Done. Found ${clips.length} pitches.` + ' Use the buttons under the video to add, remove or nudge clips, then make your highlight reel.' + note;
   $('prog').classList.add('hidden');
   showClips(true);
