@@ -76,7 +76,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.10</div>
+  <div class="ver">v5.2</div>
 </header>
 
 <div class="wrap">
@@ -193,11 +193,14 @@ const POSE_STEP = 1 / 15;    // AI scan samples per second
 const MOTION_STEP = 1 / 10;  // motion scan samples per second
 const CATCH_BEFORE = 1.8;     // how far before a moment to look for the catcher moving first (a throw back)
 const CATCH_AFTER_MIN = 0.2;  // a real pitch jolts the catcher's mitt this long after the throw
-const CATCH_AFTER_MAX = 1.4;
+const CATCH_AFTER_MAX = 2.0;  // look this long after the throw for the mitt jolt
+const CATCH_CONFIRM = 0.5;    // with a catcher box, a pitch must jolt the catcher at least this fraction of the motion bar
+const CATCH_OVER_QUIET = 2.0; // and at least this many times his normal (quiet) movement
 const CATCH_MIN = 0.8;        // catcher motion before the moment must reach this fraction of the motion bar to count
 const CATCH_RATIO = 1.25;     // and be this many times stronger than the catcher motion after the moment
 const AI_MODEL = 'full';      // 'full' = more accurate for a small, far-away pitcher (slower); 'lite' = faster
 const AI_SIZE = 512;          // how big the AI's view of the pitcher is (higher = sharper, slower)
+const MAX_EXTEND = 4.0;      // a clip can run up to this much longer if the pitcher is still moving
 const MAX_ZOOM = 6;           // how far the Zoom + button can zoom in on the first frame
 // ----------------------------------------------------------
 import { PoseLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
@@ -263,11 +266,23 @@ $('file').onchange = async () => {
 };
 
 // ---------- Step 2: draw the box ----------
+// ---------- Zoom and move: the picture is zoomed inside the frame, so Braden can never be pushed out of reach ----------
+let zoom = 1, panMode = false, vx = 0, vy = 0, panStart = null;
+function clampView() {
+  const vw = cv.width / zoom, vh = cv.height / zoom;
+  vx = Math.min(Math.max(0, vx), cv.width - vw);
+  vy = Math.min(Math.max(0, vy), cv.height - vh);
+}
 function redraw() {
-  ctx.putImageData(window.firstFrame, 0, 0);
+  if (!frameCanvas) return;
+  clampView();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(frameCanvas, vx, vy, cv.width / zoom, cv.height / zoom, 0, 0, cv.width, cv.height);
   ctx.lineWidth = Math.max(3, cv.width / 250);
-  if (box) { ctx.strokeStyle = '#ffb020'; ctx.strokeRect(...box); }
-  if (catcher) { ctx.strokeStyle = '#3ba3ff'; ctx.strokeRect(...catcher); }
+  const show = b => [(b[0] - vx) * zoom, (b[1] - vy) * zoom, b[2] * zoom, b[3] * zoom];
+  if (box) { ctx.strokeStyle = '#ffb020'; ctx.strokeRect(...show(box)); }
+  if (catcher) { ctx.strokeStyle = '#3ba3ff'; ctx.strokeRect(...show(catcher)); }
 }
 function drawPreview(b, id) {
   if (!b || !frameCanvas || b[2] < 4 || b[3] < 4) return;
@@ -280,16 +295,16 @@ function drawPreview(b, id) {
   c.drawImage(frameCanvas, b[0], b[1], b[2], b[3], 0, 0, p.width, p.height);
 }
 function updatePreview() { drawPreview(box, 'boxPreview'); drawPreview(catcher, 'catcherPreview'); }
-function pos(e) {
+// where a touch lands on the screen, in canvas pixels
+function screenPos(e) {
   const r = cv.getBoundingClientRect(); const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
   return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
 }
-// ---------- Zoom: so you can see a small, far-away pitcher while drawing the box ----------
-let zoom = 1, panMode = false;
-const zoomWrap = document.createElement('div');
-zoomWrap.style.cssText = 'width:100%;overflow:auto;max-height:70vh;-webkit-overflow-scrolling:touch;border-radius:10px';
-cv.parentNode.insertBefore(zoomWrap, cv);
-zoomWrap.appendChild(cv);
+// where a touch lands on the actual video frame
+function pos(e) {
+  const p = screenPos(e);
+  return [vx + p[0] / zoom, vy + p[1] / zoom];
+}
 const zoomBar = document.createElement('div');
 zoomBar.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0';
 const zBtn = (label, fn) => {
@@ -302,39 +317,60 @@ const zoomLabel = document.createElement('span'); zoomLabel.style.cssText = 'col
 zoomBar.appendChild(zoomLabel);
 zBtn('Zoom +', () => setZoom(zoom * 1.5));
 const panBtn = zBtn('', () => { panMode = !panMode; updateZoomUi(); });
-zoomWrap.parentNode.insertBefore(zoomBar, zoomWrap);
+cv.parentNode.insertBefore(zoomBar, cv);
 function updateZoomUi() {
   zoomLabel.textContent = zoom.toFixed(1) + 'x';
   panBtn.textContent = panMode ? 'Mode: move picture (tap to draw)' : 'Mode: draw box (tap to move)';
   panBtn.style.background = panMode ? '#3ba3ff' : '#1a2540';
-  cv.style.touchAction = panMode ? 'pan-x pan-y' : 'none';
+  cv.style.touchAction = 'none';
 }
 function setZoom(z) {
   z = Math.min(MAX_ZOOM, Math.max(1, z));
-  // keep the same spot in the middle of the view
-  const cx = (zoomWrap.scrollLeft + zoomWrap.clientWidth / 2) / Math.max(1, zoomWrap.scrollWidth);
-  const cy = (zoomWrap.scrollTop + zoomWrap.clientHeight / 2) / Math.max(1, zoomWrap.scrollHeight);
+  // zoom toward the pitcher box if there is one, otherwise keep the middle of the view
+  let cx = vx + cv.width / zoom / 2, cy = vy + cv.height / zoom / 2;
+  if (box && zoom === 1) { cx = box[0] + box[2] / 2; cy = box[1] + box[3] / 2; }
   zoom = z;
-  cv.style.maxWidth = 'none';
-  cv.style.width = (zoom * 100) + '%';
-  cv.style.height = 'auto';
-  requestAnimationFrame(() => {
-    zoomWrap.scrollLeft = cx * zoomWrap.scrollWidth - zoomWrap.clientWidth / 2;
-    zoomWrap.scrollTop = cy * zoomWrap.scrollHeight - zoomWrap.clientHeight / 2;
-  });
+  vx = cx - cv.width / zoom / 2; vy = cy - cv.height / zoom / 2;
+  redraw();
   updateZoomUi();
 }
 updateZoomUi();
+// Pitcher / catcher box switch (added here in case the page doesn't already have one)
+if (!document.querySelector('#boxwho button')) {
+  const pb = zBtn('', () => { who = 'pitcher'; updateWho(); });
+  const cb = zBtn('', () => { who = 'catcher'; updateWho(); });
+  function updateWho() {
+    pb.textContent = (who === 'pitcher' ? '\u2713 ' : '') + 'Box: Braden';
+    cb.textContent = (who === 'catcher' ? '\u2713 ' : '') + 'Box: catcher';
+    pb.style.borderColor = who === 'pitcher' ? '#ffb020' : '#2d3d5c';
+    cb.style.borderColor = who === 'catcher' ? '#3ba3ff' : '#2d3d5c';
+    if ($('boxHint')) $('boxHint').textContent = who === 'catcher'
+      ? 'Drag a box around the catcher: his mitt and upper body. Leave out the umpire and the batter.'
+      : 'Drag a box tight around Braden on the mound.';
+  }
+  updateWho();
+}
 
-const down = e => { if (panMode) return; e.preventDefault(); dragStart = pos(e); };
+const down = e => {
+  e.preventDefault();
+  if (panMode) { panStart = { p: screenPos(e), vx, vy }; return; }
+  dragStart = pos(e);
+};
 const move = e => {
-  if (panMode || !dragStart) return; e.preventDefault();
+  if (panMode) {
+    if (!panStart) return; e.preventDefault();
+    const p = screenPos(e);
+    vx = panStart.vx - (p[0] - panStart.p[0]) / zoom;
+    vy = panStart.vy - (p[1] - panStart.p[1]) / zoom;
+    redraw(); return;
+  }
+  if (!dragStart) return; e.preventDefault();
   const p = pos(e);
   const r = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]), Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
   if (who === 'catcher') catcher = r; else box = r;
   redraw();
 };
-const up = () => { if (dragStart) { dragStart = null; updatePreview(); } };
+const up = () => { panStart = null; if (dragStart) { dragStart = null; updatePreview(); } };
 ['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
 ['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
 ['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
@@ -407,20 +443,22 @@ function findWindupStart(motion, release, threshold) {
     else { gap += MOTION_STEP; if (gap > 0.5) break; }
   }
   return Math.min(start, release - 0.8);   // a windup lasts at least 0.8 seconds
-}
-
-// A real pitch: the pitcher moves, then the catcher's mitt jolts. A throw back is the reverse: the catcher moves first.
+}// A real pitch: the pitcher moves, then the catcher's mitt jolts. A throw back is the reverse: the catcher moves first.
 // A moment is dropped only when the catcher moved a lot BEFORE it and more than AFTER it.
 function catcherCheck(cm, release, threshold) {
   const { t, l } = cm;
-  let before = 0, after = 0;
+  let before = 0, after = 0, afterT = null;
   for (let k = 0; k < t.length; k++) {
     const d = t[k] - release;
     if (d >= -CATCH_BEFORE && d <= -0.1) before = Math.max(before, l[k]);
-    if (d >= CATCH_AFTER_MIN && d <= CATCH_AFTER_MAX) after = Math.max(after, l[k]);
+    if (d >= CATCH_AFTER_MIN && d <= CATCH_AFTER_MAX && l[k] > after) { after = l[k]; afterT = t[k]; }
   }
+  const sorted = [...l].sort((a, b) => a - b);
+  const quiet = sorted[Math.floor(sorted.length * 0.5)] || 0;
   const movedFirst = before >= threshold * CATCH_MIN && before > after * CATCH_RATIO;
-  return { before, after, ok: !movedFirst };
+  const jolt = after >= threshold * CATCH_CONFIRM && after >= quiet * CATCH_OVER_QUIET;
+  const why = movedFirst ? 'catcher moved first (throw back)' : (!jolt ? 'no mitt jolt after' : 'mitt jolt');
+  return { before, after, afterT, quiet, ok: !movedFirst && jolt, why };
 }
 
 // ---------- Detector 2: AI pose (throwing arm speed) ----------
@@ -601,10 +639,22 @@ function drawDebug(dur, motion, pose, bar, threshold, kept, considered, seen) {
 }
 
 // ---------- Clips: built around the windup, editable ----------
-function makeClip(release, windupStart, srcs) {
+// When the pitcher's motion keeps going after the detected moment, the real throw may come later: keep the clip running.
+function motionEnd(motion, release, threshold) {
+  if (!motion) return release;
+  const { t, l } = motion; const low = threshold * 0.5;
+  let end = release, gap = 0;
+  for (let k = 0; k < t.length; k++) {
+    if (t[k] < release) continue;
+    if (t[k] - release > MAX_EXTEND) break;
+    if (l[k] > low) { end = t[k]; gap = 0; } else { gap += MOTION_STEP; if (gap > 0.7) break; }
+  }
+  return end;
+}
+function makeClip(release, windupStart, srcs, moveEnd) {
   let start = Math.min(release - PRE_RELEASE, windupStart - WINDUP_LEAD);
   start = Math.max(start, release - MAX_BACK);
-  let end = Math.max(release + AFTER_RELEASE, start + MIN_LEN);
+  let end = Math.max(release + AFTER_RELEASE, start + MIN_LEN, (moveEnd || 0) + 1.5);
   start = Math.max(0, start);
   if (end > videoDur) { const len = end - start; end = videoDur; start = Math.max(0, end - len); }
   return { release, start, end, srcs };
@@ -660,9 +710,21 @@ async function findPitches() {
   // drop moments where the catcher moved first (a throw back to the pitcher)
   const checks = combined.kept.map(k => catcherMotion ? catcherCheck(catcherMotion, k.time, threshold) : null);
   const kept = combined.kept.filter((k, i) => !checks[i] || checks[i].ok);
-  const catchTxt = catcherMotion ? combined.kept.map((k, i) => k.time.toFixed(1) + 's: before=' + checks[i].before.toFixed(3) + ' after=' + checks[i].after.toFixed(3) + (checks[i].ok ? ' kept' : ' DROPPED')).join('  |  ') : '';
-  clips = kept.map(k => makeClip(k.time, findWindupStart(motion, k.time, threshold), k.srcs));
+  const catchTxt = catcherMotion ? combined.kept.map((k, i) => k.time.toFixed(1) + 's: before=' + checks[i].before.toFixed(3) + ' after=' + checks[i].after.toFixed(3) + ' quiet=' + checks[i].quiet.toFixed(3) + (checks[i].ok ? ' KEPT' : ' DROPPED, ' + checks[i].why)).join('  |  ') : '';
+  clips = kept.map(k => {
+    const i = combined.kept.indexOf(k);
+    let endAt = motionEnd(motion, k.time, threshold);
+    if (checks[i] && checks[i].afterT != null) endAt = Math.max(endAt, checks[i].afterT);   // always show the ball reaching the mitt
+    return makeClip(k.time, findWindupStart(motion, k.time, threshold), k.srcs, endAt);
+  });
+  if (!catcherMotion) note += ' Tip: draw a second box around the catcher (Box: catcher) so PitchCut can throw out fakes.';
   drawDebug(dur, motion, pose, bar, threshold, kept, considered, pose ? pose.seen : 0);
+  if ($('peaks')) $('peaks').textContent += '\nPitch details: ' + clips.map((c, i) => {
+    const w = findWindupStart(motion, c.release, threshold);
+    const me = motionEnd(motion, c.release, threshold);
+    let ai = 0; if (pose) pose.t.forEach((tt, j) => { if (Math.abs(tt - c.release) < 0.15) ai = Math.max(ai, pose.s[j]); });
+    return '#' + (i + 1) + ' at ' + c.release.toFixed(1) + 's, AI ' + ai.toFixed(1) + ', windup ' + (c.release - w).toFixed(1) + 's, motion after ' + (me - c.release).toFixed(1) + 's';
+  }).join('  |  ');
   if (catchTxt && $('peaks')) $('peaks').textContent += '\nCatcher check (catcher motion before and after each moment; counts as moved first at about ' + (threshold * CATCH_MIN).toFixed(3) + ' or more): ' + catchTxt;
   $('msg').textContent = `Done. Found ${clips.length} pitches.` + ' Use the buttons under the video to add, remove or nudge clips, then make your highlight reel.' + note;
   $('prog').classList.add('hidden');
