@@ -74,7 +74,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.6.1</div>
+  <div class="ver">v4.6.2</div>
 </header>
 
 <div class="wrap">
@@ -106,12 +106,12 @@
     </div>
     <div class="two" style="margin-top:12px">
       <div>
-        <div class="hint">Sensitivity (higher catches more)</div>
+        <div class="hint">Sensitivity (higher catches more): <b id="sensVal">7</b></div>
         <input type="range" id="sens" min="1" max="10" value="7">
       </div>
       <div>
-        <div class="hint">Strictness (higher drops weak moments)</div>
-        <input type="range" id="strict" min="1" max="10" value="5">
+        <div class="hint">Strictness (higher drops weak moments): <b id="strictVal">4</b></div>
+        <input type="range" id="strict" min="1" max="10" value="4">
       </div>
     </div>
     <div class="row"><button class="primary" onclick="findPitches()">Find pitches</button></div>
@@ -170,7 +170,7 @@
 
 <script type="module">
 // ---------------- Settings you can change ----------------
-const PRE = 2.0;             // seconds kept before the pitch moment
+const PRE = 3.0;             // seconds kept before the pitch moment
 const AFTER = 3.5;           // seconds kept after the pitch moment (fixed, so every clip is the same length)
 const WINDUP_TO_THROW = 1.2; // motion-only estimate: seconds from first motion to release
 const LOCKOUT = 6.0;         // two pitches cannot be closer together than this (covers the return throw)
@@ -345,6 +345,9 @@ document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
   mode = b.dataset.m;
   document.querySelectorAll('#mode button').forEach(x => x.classList.toggle('on', x === b));
 });
+
+// show each slider's number next to its label
+['sens','strict'].forEach(id => { const s = $(id), o = $(id + 'Val'); const show = () => { o.textContent = s.value; }; s.addEventListener('input', show); show(); });
 
 function setProgress(frac, label) {
   $('prog').value = frac; $('prog').max = 1;
