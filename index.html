@@ -74,7 +74,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.6</div>
+  <div class="ver">v4.6.1</div>
 </header>
 
 <div class="wrap">
@@ -87,7 +87,13 @@
 
   <div class="card hidden" id="step2">
     <h3><span class="step">2</span>Box the pitcher</h3>
-    <div class="hint">Drag a box tight around Braden on the mound, from just above his head to just below his feet, with a little room for his arms.</div>
+    <div class="hint">Pinch with two fingers to zoom in on Braden, then drag with one finger to draw a box tight around him, from just above his head to just below his feet, with a little room for his arms.</div>
+    <div class="row" style="margin:0 0 8px">
+      <button type="button" onclick="zoomBy(1/1.5)">Zoom &minus;</button>
+      <button type="button" onclick="zoomBy(1.5)">Zoom +</button>
+      <button type="button" onclick="zoomReset()">Reset zoom</button>
+      <span id="zoomLbl" class="hint" style="margin:0">1.0x</span>
+    </div>
     <canvas id="cv"></canvas>
     <div class="hint" style="margin-top:12px">This is what PitchCut will watch. Braden should fill this picture.</div>
     <canvas id="boxPreview" width="1" height="1"></canvas>
@@ -226,7 +232,7 @@ $('file').onchange = async () => {
     frameCanvas = document.createElement('canvas');
     frameCanvas.width = cv.width; frameCanvas.height = cv.height;
     frameCanvas.getContext('2d').drawImage(cv, 0, 0);
-    box = null;
+    box = null; zoom = 1; vx = 0; vy = 0; redraw();
     v.remove();
     $('loadMsg').textContent = 'Video loaded.';
     $('step2').classList.remove('hidden');
@@ -235,9 +241,24 @@ $('file').onchange = async () => {
 };
 
 // ---------- Step 2: draw the box ----------
+// The box is always stored in real video pixels, so zooming never changes what the detectors see.
+const MAX_ZOOM = 8;
+let zoom = 1, vx = 0, vy = 0, pinch = null;
+function clampView() {
+  zoom = Math.min(MAX_ZOOM, Math.max(1, zoom));
+  vx = Math.min(Math.max(0, vx), cv.width - cv.width / zoom);
+  vy = Math.min(Math.max(0, vy), cv.height - cv.height / zoom);
+}
 function redraw() {
-  ctx.putImageData(window.firstFrame, 0, 0);
-  if (box) { ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, cv.width / 250); ctx.strokeRect(...box); }
+  if (!frameCanvas) return;
+  clampView();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(frameCanvas, vx, vy, cv.width / zoom, cv.height / zoom, 0, 0, cv.width, cv.height);
+  if (box) {
+    ctx.strokeStyle = '#ffb020'; ctx.lineWidth = Math.max(3, cv.width / 250);
+    ctx.strokeRect((box[0] - vx) * zoom, (box[1] - vy) * zoom, box[2] * zoom, box[3] * zoom);
+  }
+  if ($('zoomLbl')) $('zoomLbl').textContent = zoom.toFixed(1) + 'x';
 }
 function updatePreview() {
   if (!box || !frameCanvas || box[2] < 4 || box[3] < 4) return;
@@ -248,21 +269,77 @@ function updatePreview() {
   c.imageSmoothingEnabled = true;
   c.drawImage(frameCanvas, box[0], box[1], box[2], box[3], 0, 0, p.width, p.height);
 }
-function pos(e) {
-  const r = cv.getBoundingClientRect(); const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+// a point on the screen, in canvas pixels
+function screenXY(t) {
+  const r = cv.getBoundingClientRect();
   return [(t.clientX - r.left) * cv.width / r.width, (t.clientY - r.top) * cv.height / r.height];
 }
-const down = e => { e.preventDefault(); dragStart = pos(e); };
+// a point on the actual video frame
+function pos(e) {
+  const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+  const p = screenXY(t);
+  return [vx + p[0] / zoom, vy + p[1] / zoom];
+}
+// zoom buttons: zoom toward Braden's box if there is one, otherwise the middle of the view
+window.zoomBy = f => {
+  if (!frameCanvas) return;
+  let cx = vx + cv.width / zoom / 2, cy = vy + cv.height / zoom / 2;
+  if (box && box[2] > 4) { cx = box[0] + box[2] / 2; cy = box[1] + box[3] / 2; }
+  zoom = Math.min(MAX_ZOOM, Math.max(1, zoom * f));
+  vx = cx - cv.width / zoom / 2; vy = cy - cv.height / zoom / 2;
+  redraw();
+};
+window.zoomReset = () => { zoom = 1; vx = 0; vy = 0; redraw(); };
+function pinchInfo(e) {
+  const a = screenXY(e.touches[0]), b = screenXY(e.touches[1]);
+  return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+}
+let boxBeforeDrag = null;
+const down = e => {
+  e.preventDefault();
+  if (e.touches && e.touches.length >= 2) {
+    // second finger landed: stop drawing, start pinching
+    if (dragStart) { box = boxBeforeDrag; dragStart = null; }
+    const p = pinchInfo(e);
+    pinch = { d: p.d, zoom, fx: vx + p.m[0] / zoom, fy: vy + p.m[1] / zoom };
+    redraw();
+    return;
+  }
+  if (pinch) return;
+  boxBeforeDrag = box;
+  dragStart = pos(e);
+};
 const move = e => {
+  if (pinch && e.touches && e.touches.length >= 2) {
+    e.preventDefault();
+    const p = pinchInfo(e);
+    zoom = Math.min(MAX_ZOOM, Math.max(1, pinch.zoom * p.d / pinch.d));
+    // keep the spot under your fingers under your fingers
+    vx = pinch.fx - p.m[0] / zoom; vy = pinch.fy - p.m[1] / zoom;
+    redraw();
+    return;
+  }
   if (!dragStart) return; e.preventDefault();
   const p = pos(e);
   box = [Math.min(dragStart[0], p[0]), Math.min(dragStart[1], p[1]), Math.abs(p[0] - dragStart[0]), Math.abs(p[1] - dragStart[1])];
   redraw();
 };
-const up = () => { if (dragStart) { dragStart = null; updatePreview(); } };
+const up = e => {
+  if (pinch) { if (!e.touches || e.touches.length === 0) pinch = null; return; }
+  if (dragStart) { dragStart = null; updatePreview(); }
+};
 ['mousedown','touchstart'].forEach(n => cv.addEventListener(n, down, { passive: false }));
 ['mousemove','touchmove'].forEach(n => cv.addEventListener(n, move, { passive: false }));
-['mouseup','touchend','mouseleave'].forEach(n => cv.addEventListener(n, up));
+['mouseup','touchend','touchcancel','mouseleave'].forEach(n => cv.addEventListener(n, up));
+// laptop: scroll wheel / trackpad pinch zooms toward the pointer
+cv.addEventListener('wheel', e => {
+  if (!frameCanvas) return;
+  e.preventDefault();
+  const p = screenXY(e), fx = vx + p[0] / zoom, fy = vy + p[1] / zoom;
+  zoom = Math.min(MAX_ZOOM, Math.max(1, zoom * Math.exp(-e.deltaY * 0.0025)));
+  vx = fx - p[0] / zoom; vy = fy - p[1] / zoom;
+  redraw();
+}, { passive: false });
 
 document.querySelectorAll('#mode button').forEach(b => b.onclick = () => {
   mode = b.dataset.m;
