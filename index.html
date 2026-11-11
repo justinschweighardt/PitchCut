@@ -57,6 +57,8 @@
   @media (max-width:520px) { .two { grid-template-columns:1fr; } }
   .editbar { margin-top:16px; padding-top:14px; border-top:1px solid #22314f; }
   .editbar .lbl { color:var(--muted); font-size:13px; font-weight:700; margin-bottom:6px; }
+  button:disabled { opacity:.5; }
+  #reelPreview { width:100%; border-radius:14px; background:#000; display:block; margin-top:8px; max-height:50vh; }
 </style>
 </head>
 <body>
@@ -74,7 +76,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.6.2</div>
+  <div class="ver">v4.6.3</div>
 </header>
 
 <div class="wrap">
@@ -158,6 +160,24 @@
       </div>
       <div class="hint" id="editMsg">To add a missed pitch: pause the video on the moment of the pitch, then tap Add pitch here.</div>
     </div>
+
+    <div class="editbar">
+      <div class="lbl">Highlight reel</div>
+      <div class="hint">Joins every clip in the list above into one video you can save to your phone. Fix the list first. Recording takes about as long as the reel itself, so keep this screen open while it records.</div>
+      <div class="hint" style="margin-bottom:4px">Music (optional): pick a song file from your phone. Leave it empty for no sound.</div>
+      <input type="file" id="music" accept="audio/*,.mp3,.m4a,.aac,.wav">
+      <div class="row">
+        <button type="button" onclick="clearMusic()">No music</button>
+        <span class="hint" style="margin:0">Music volume: <b id="musicVolVal">80</b>%</span>
+      </div>
+      <input type="range" id="musicVol" min="10" max="100" value="80">
+      <div class="row"><button class="primary" id="makeReelBtn" onclick="makeReel()">Make highlight reel</button></div>
+      <div id="reelMsg" class="hint"></div>
+      <div id="reelOut" class="hidden">
+        <video id="reelPreview" controls playsinline></video>
+        <div class="row"><button class="primary" onclick="saveReel()">Save to phone</button></div>
+      </div>
+    </div>
   </div>
 
   <div class="card hidden" id="debugCard">
@@ -187,6 +207,7 @@ const cv = $('cv'), ctx = cv.getContext('2d');
 const player = $('player');
 let url = null, box = null, dragStart = null, mode = 'both', frameCanvas = null, videoDur = 0;
 let clips = [], cur = 0, loop = false, reel = false, landmarker = null;
+let reeling = false, reelBlob = null, reelUrl = null, reelExt = 'mp4';
 
 function makeVideo(src) {
   return new Promise((resolve, reject) => {
@@ -659,6 +680,138 @@ window.gotoClip = gotoClip;
 window.toggleLoop = () => { loop = !loop; $('loopBtn').textContent = 'Loop: ' + (loop ? 'on' : 'off'); $('loopBtn').classList.toggle('on', loop); };
 window.toggleReel = () => { reel = !reel; $('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); $('reelBtn').classList.toggle('on', reel); };
 Object.defineProperty(window, 'cur', { get: () => cur });
+
+// ---------- Highlight reel: join all clips into one video, with optional music ----------
+$('musicVol').addEventListener('input', () => { $('musicVolVal').textContent = $('musicVol').value; });
+window.clearMusic = () => { $('music').value = ''; $('reelMsg').textContent = 'No music. The reel will be silent.'; };
+function pickMime(withAudio) {
+  if (!window.MediaRecorder) return null;
+  const tries = withAudio
+    ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
+    : ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  for (const m of tries) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
+  return '';
+}
+window.makeReel = async () => {
+  const msg = $('reelMsg'), btn = $('makeReelBtn');
+  if (!clips.length) { msg.textContent = 'Find some pitches first.'; return; }
+  if (reeling) return;
+  const musicFile = $('music').files[0] || null;
+  // the audio engine has to be started right away, while your tap still counts
+  let actx = null;
+  if (musicFile) {
+    try { actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); }
+    catch (e) { actx = null; }
+  }
+  reeling = true; btn.disabled = true; $('reelOut').classList.add('hidden');
+  let wake = null, v = null, stream = null, song = null;
+  try {
+    const mime = pickMime(!!musicFile);
+    if (mime === null) throw new Error('This browser cannot record video.');
+    const probe = document.createElement('canvas');
+    if (!probe.captureStream) throw new Error('This browser cannot record from the screen canvas. Try the laptop instead.');
+    msg.textContent = 'Getting ready...';
+    v = await makeVideo(url);
+    v.style.cssText = 'position:fixed;right:0;bottom:0;width:160px;height:90px;opacity:0.01;pointer-events:none';
+    const sc = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+    const cw = Math.max(2, Math.round(v.videoWidth * sc / 2) * 2), ch = Math.max(2, Math.round(v.videoHeight * sc / 2) * 2);
+    const canvas = document.createElement('canvas'); canvas.width = cw; canvas.height = ch;
+    const c2 = canvas.getContext('2d');
+    await seek(v, clips[0].start);
+    c2.drawImage(v, 0, 0, cw, ch);
+    const vidStream = canvas.captureStream(30);
+    stream = vidStream;
+
+    // music: decode the song and feed it into the recording (not out of the speaker)
+    let gain = null;
+    if (musicFile) {
+      if (!actx) throw new Error('This browser cannot add music. Tap No music and try again.');
+      msg.textContent = 'Loading the song...';
+      const data = await musicFile.arrayBuffer();
+      const buf = await new Promise((res, rej) => actx.decodeAudioData(data, res, () => rej(new Error('That song file could not be read. Try an .mp3 or .m4a file.'))));
+      await actx.resume();
+      const dest = actx.createMediaStreamDestination();
+      gain = actx.createGain();
+      gain.gain.value = parseInt($('musicVol').value) / 100;
+      song = actx.createBufferSource(); song.buffer = buf; song.loop = true;
+      song.connect(gain); gain.connect(dest);
+      stream = new MediaStream([...vidStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    }
+
+    const opts = mime ? { mimeType: mime, videoBitsPerSecond: 6000000 } : { videoBitsPerSecond: 6000000 };
+    const rec = new MediaRecorder(stream, opts);
+    const chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    const stopped = new Promise(res => { rec.onstop = res; });
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    let drawing = true;
+    const draw = () => { if (!drawing) return; c2.drawImage(v, 0, 0, cw, ch); requestAnimationFrame(draw); };
+    rec.start(250);
+    if (song) song.start();
+    draw();
+    for (let i = 0; i < clips.length; i++) {
+      const c = clips[i];
+      msg.textContent = `Recording clip ${i + 1} of ${clips.length}... keep this screen open`;
+      await seek(v, c.start);
+      v.playbackRate = 1;
+      try { await v.play(); } catch (e) {}
+      await new Promise(res => {
+        const limit = setTimeout(res, (c.end - c.start + 6) * 1000);
+        const tick = () => {
+          if (v.currentTime >= c.end || v.ended) { clearTimeout(limit); res(); return; }
+          requestAnimationFrame(tick);
+        };
+        tick();
+      });
+      v.pause();
+    }
+    // fade the music out over the last second, on the final frame
+    if (gain) {
+      const now = actx.currentTime;
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(0, now + 1.0);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    drawing = false;
+    rec.stop();
+    await stopped;
+    const type = rec.mimeType || mime || 'video/mp4';
+    reelBlob = new Blob(chunks, { type });
+    if (reelBlob.size < 1000) throw new Error('The recording came out empty. This browser may not support recording this way.');
+    reelExt = type.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+    if (reelUrl) URL.revokeObjectURL(reelUrl);
+    reelUrl = URL.createObjectURL(reelBlob);
+    $('reelPreview').src = reelUrl;
+    $('reelOut').classList.remove('hidden');
+    msg.textContent = reelExt === 'mp4'
+      ? 'Your reel is ready. Check it below, then tap Save to phone.'
+      : 'Your reel is ready, but this browser made a webm file, which will not save to Photos on an iPhone. It will play here and can be downloaded on a computer.';
+    $('reelOut').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    msg.textContent = 'Problem making the reel: ' + e.message;
+  } finally {
+    try { if (song) song.stop(); } catch (e) {}
+    try { if (actx) actx.close(); } catch (e) {}
+    try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+    try { if (v) v.remove(); } catch (e) {}
+    try { if (wake) wake.release(); } catch (e) {}
+    reeling = false; btn.disabled = false;
+  }
+};
+window.saveReel = async () => {
+  if (!reelBlob) return;
+  const file = new File([reelBlob], `PitchCut-reel.${reelExt}`, { type: reelBlob.type });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'PitchCut highlight reel' });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a');
+  a.href = reelUrl; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  $('reelMsg').textContent = 'If nothing downloaded, press and hold the video above and choose Save.';
+};
 </script>
 </body>
 </html>
