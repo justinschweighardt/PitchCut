@@ -58,6 +58,10 @@
   .editbar { margin-top:16px; padding-top:14px; border-top:1px solid #22314f; }
   .editbar .lbl { color:var(--muted); font-size:13px; font-weight:700; margin-bottom:6px; }
   button:disabled { opacity:.5; }
+  #playerWrap { position:relative; }
+  #overlay { position:absolute; left:0; top:0; width:auto; background:transparent; border-radius:0; pointer-events:none; touch-action:auto; }
+  .tag.ball { background:#3a1030; color:#ffb3f0; }
+  #trackBtn.on { background:var(--accent2); color:#06182e; }
   #reelPreview { width:100%; border-radius:14px; background:#000; display:block; margin-top:8px; max-height:50vh; }
 </style>
 </head>
@@ -76,7 +80,7 @@
     <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
   </svg>
   <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.6.3</div>
+  <div class="ver">v4.6.5</div>
 </header>
 
 <div class="wrap">
@@ -124,7 +128,7 @@
   <div class="card hidden" id="step3">
     <h3><span class="step">3</span>Review pitches</h3>
     <div class="cards" id="cards"></div>
-    <video id="player" controls playsinline muted></video>
+    <div id="playerWrap"><video id="player" controls playsinline muted></video><canvas id="overlay" width="1" height="1"></canvas></div>
     <div class="speeds" id="speeds">
       <span class="lbl">Speed</span>
       <button data-s="1" class="on">1x</button>
@@ -162,15 +166,15 @@
     </div>
 
     <div class="editbar">
+      <div class="lbl">Ball tracking</div>
+      <div class="hint">Optional. Finds the ball's flight on each pitch by itself and draws it on the video and in the highlight reel. Takes a few seconds per pitch, so keep this screen open while it works. Fix the list first.</div>
+      <div class="row" style="margin-top:0"><button id="trackBtn" onclick="toggleTracking()">Ball tracking: off</button></div>
+      <div class="hint" id="trackMsg"></div>
+    </div>
+
+    <div class="editbar">
       <div class="lbl">Highlight reel</div>
-      <div class="hint">Joins every clip in the list above into one video you can save to your phone. Fix the list first. Recording takes about as long as the reel itself, so keep this screen open while it records.</div>
-      <div class="hint" style="margin-bottom:4px">Music (optional): pick a song file from your phone. Leave it empty for no sound.</div>
-      <input type="file" id="music" accept="audio/*,.mp3,.m4a,.aac,.wav">
-      <div class="row">
-        <button type="button" onclick="clearMusic()">No music</button>
-        <span class="hint" style="margin:0">Music volume: <b id="musicVolVal">80</b>%</span>
-      </div>
-      <input type="range" id="musicVol" min="10" max="100" value="80">
+      <div class="hint">Joins every clip in the list above into one video you can save to your phone. Fix the list first. Recording takes about as long as the reel itself and has no sound, so keep this screen open while it records.</div>
       <div class="row"><button class="primary" id="makeReelBtn" onclick="makeReel()">Make highlight reel</button></div>
       <div id="reelMsg" class="hint"></div>
       <div id="reelOut" class="hidden">
@@ -208,6 +212,7 @@ const player = $('player');
 let url = null, box = null, dragStart = null, mode = 'both', frameCanvas = null, videoDur = 0;
 let clips = [], cur = 0, loop = false, reel = false, landmarker = null;
 let reeling = false, reelBlob = null, reelUrl = null, reelExt = 'mp4';
+let tracking = false, trackingBusy = false, reelClip = null;
 
 function makeVideo(src) {
   return new Promise((resolve, reject) => {
@@ -599,6 +604,7 @@ async function findPitches() {
   $('msg').textContent = `Done. Found ${clips.length} pitches. Use the buttons under the video to add, remove or nudge clips.` + note;
   $('prog').classList.add('hidden');
   showClips(true);
+  if (tracking) trackAll();
 }
 window.findPitches = findPitches;
 
@@ -609,7 +615,8 @@ function showClips(loadFirst) {
   clips.forEach((c, i) => {
     const b = document.createElement('button'); b.className = 'pcard';
     const tags = c.srcs.map(s => s === 'you' ? '<span class="tag you">Added by you</span>' : `<span class="tag ${s === 'pose' ? 'ai' : ''}">${s === 'pose' ? 'AI pose' : 'Motion'}</span>`).join(' ');
-    b.innerHTML = `<div class="n">Pitch ${i + 1}</div><div class="t">${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s</div>${tags}`;
+    const ballTag = tracking && c.trackDone ? (c.track ? ' <span class="tag ball">Ball tracked</span>' : ' <span class="tag">Ball not found</span>') : '';
+    b.innerHTML = `<div class="n">Pitch ${i + 1}</div><div class="t">${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s</div>${tags}${ballTag}`;
     b.onclick = () => gotoClip(i); box3.appendChild(b);
   });
   if (loadFirst) {
@@ -655,6 +662,7 @@ window.addPitch = () => {
   clips.push(c);
   refreshClips(c.moment);
   $('editMsg').textContent = `Added a pitch at ${t.toFixed(1)}s. Clip runs ${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s.`;
+  if (tracking) trackAll();
 };
 window.removePitch = () => {
   if (!clips.length) return;
@@ -669,7 +677,9 @@ window.nudge = d => {
   const len = c.end - c.start;
   c.start = Math.max(0, Math.min(videoDur - len, c.start + d));
   c.end = c.start + len; c.moment = c.start + PRE;
+  c.trackDone = false; c.track = null;
   refreshClips(c.moment);
+  if (tracking) trackAll();
   player.currentTime = c.start;
   $('editMsg').textContent = `Clip now runs ${c.start.toFixed(1)}s to ${c.end.toFixed(1)}s.`;
 };
@@ -681,14 +691,286 @@ window.toggleLoop = () => { loop = !loop; $('loopBtn').textContent = 'Loop: ' + 
 window.toggleReel = () => { reel = !reel; $('reelBtn').textContent = 'Play all: ' + (reel ? 'on' : 'off'); $('reelBtn').classList.toggle('on', reel); };
 Object.defineProperty(window, 'cur', { get: () => cur });
 
-// ---------- Highlight reel: join all clips into one video, with optional music ----------
-$('musicVol').addEventListener('input', () => { $('musicVolVal').textContent = $('musicVol').value; });
-window.clearMusic = () => { $('music').value = ''; $('reelMsg').textContent = 'No music. The reel will be silent.'; };
-function pickMime(withAudio) {
+// ---------- Ball tracker: finds the flight of a white ball leaving the pitcher's box ----------
+// Feed it frames one at a time (RGBA pixels, all the same size), then call finish().
+// box = Braden's box in the same pixel units as the frames: [x, y, w, h].
+function makeBallTracker(W, H, box, opts) {
+  opts = opts || {};
+  const s = W / 1920;                       // all distances were tuned on 1920-wide video
+  const N = W * H;
+  const [bx, by, bw, bh] = box;
+  const bx1 = bx + bw, by1 = by + bh;
+  const exL = Math.round(bx + 0.3 * bw), exR = Math.round(bx1 - 0.3 * bw);
+  const eyT = Math.round(by), eyB = Math.round(by1);
+  let g0 = null, g1 = null, rgba1 = null, t1 = 0, k = 0;
+  const freq = new Uint16Array(N);
+  const cands = [];                         // {k, t, x, y}
+  const seenK = new Set();                  // frames that were actually looked at
+  const mask = new Uint8Array(N);
+  const stack = new Int32Array(N);
+
+  const pool = [new Uint8Array(N), new Uint8Array(N), new Uint8Array(N)], raw = new Uint8Array(N); let pi = 0;
+  function toGray(rgba) {
+    const g = pool[pi]; pi = (pi + 1) % 3;
+    for (let i = 0, j = 0; i < N; i++, j += 4) raw[i] = (rgba[j] * 77 + rgba[j + 1] * 150 + rgba[j + 2] * 29) >> 8;
+    // 3x3 blur to calm compression noise
+    for (let y = 1; y < H - 1; y++) {
+      const r = y * W;
+      for (let x = 1; x < W - 1; x++) {
+        const i = r + x;
+        g[i] = (raw[i - W - 1] + 2 * raw[i - W] + raw[i - W + 1] + 2 * raw[i - 1] + 4 * raw[i] + 2 * raw[i + 1] + raw[i + W - 1] + 2 * raw[i + W] + raw[i + W + 1]) >> 4;
+      }
+    }
+    return g;
+  }
+  // is the spot around (x, y) a white ball? (bright and not colourful)
+  function isWhite(rgba, x, y) {
+    const vals = [];
+    for (let yy = Math.max(0, y - 3); yy <= Math.min(H - 1, y + 3); yy++)
+      for (let xx = Math.max(0, x - 3); xx <= Math.min(W - 1, x + 3); xx++) {
+        const j = (yy * W + xx) * 4, r = rgba[j], gg = rgba[j + 1], b = rgba[j + 2];
+        const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+        vals.push([mx, mx ? (mx - mn) * 255 / mx : 0]);
+      }
+    vals.sort((a, b) => b[0] - a[0]);
+    let v = 0, sat = 0; const n = Math.min(Math.max(3, Math.round(8 * s * s)), vals.length);   // the ball covers fewer pixels on smaller video
+    for (let i = 0; i < n; i++) { v += vals[i][0]; sat += vals[i][1]; }
+    return v / n >= 215 && sat / n <= 60;
+  }
+  // look at the middle frame of three: what moved there and is now brighter?
+  function analyse(gPrev, gMid, gNext, rgbaMid, kk, tt) {
+    seenK.add(kk);
+    mask.fill(0);
+    for (let i = 0; i < N; i++) {
+      const a = gMid[i] - gPrev[i];
+      if (a <= 15) continue;                  // must have just got brighter
+      const b = gNext[i] - gMid[i];
+      if (b > 15 || b < -15) { mask[i] = 1; freq[i]++; }
+    }
+    for (let y = eyT; y < eyB; y++) for (let x = exL; x < exR; x++) if (x >= 0 && x < W && y >= 0 && y < H) mask[y * W + x] = 0;
+    const minA = Math.max(2, Math.round(3 * s * s)), maxA = Math.max(20, Math.round(300 * s * s)), maxD = Math.max(6, 45 * s);
+    for (let i = 0; i < N; i++) {
+      if (!mask[i]) continue;
+      let sp = 0; stack[sp++] = i; mask[i] = 0;
+      let area = 0, sx = 0, sy = 0, x0 = W, x1 = 0, y0 = H, y1 = 0;
+      while (sp) {
+        const p = stack[--sp], x = p % W, y = (p - x) / W;
+        area++; sx += x; sy += y;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (x > 0 && mask[p - 1]) { mask[p - 1] = 0; stack[sp++] = p - 1; }
+        if (x < W - 1 && mask[p + 1]) { mask[p + 1] = 0; stack[sp++] = p + 1; }
+        if (y > 0 && mask[p - W]) { mask[p - W] = 0; stack[sp++] = p - W; }
+        if (y < H - 1 && mask[p + W]) { mask[p + W] = 0; stack[sp++] = p + W; }
+      }
+      const w = x1 - x0 + 1, h = y1 - y0 + 1;
+      if (area < minA || area > maxA || Math.max(w, h) > maxD) continue;
+      const cx = sx / area, cy = sy / area;
+      if (!isWhite(rgbaMid, Math.round(cx), Math.round(cy))) continue;
+      cands.push({ k: kk, t: tt, x: cx, y: cy });
+    }
+  }
+  let k1 = -1, kLast = -1, count = 0;
+  function push(rgba, t) {
+    const kk = Math.round(t * 30);               // frames are numbered by their time, so a skipped frame is just a gap
+    if (kk === kLast) return;                    // same frame twice: ignore
+    const g = toGray(rgba);
+    if (g0 && g1) analyse(g0, g1, g, rgba1, k1, t1);
+    g0 = g1; g1 = g; rgba1 = rgba; t1 = t; k1 = kk; kLast = kk; count++; k = kk + 1;
+  }
+  function finish() {
+    const nf = Math.max(1, count - 2);
+    // spots that flicker in many frames (fence edge, shimmer) are never the ball
+    const busy = (x, y) => {
+      for (let yy = Math.max(0, y - 2); yy <= Math.min(H - 1, y + 2); yy++)
+        for (let xx = Math.max(0, x - 2); xx <= Math.min(W - 1, x + 2); xx++)
+          if (freq[yy * W + xx] / nf >= 0.2) return true;
+      return false;
+    };
+    const D = new Map();
+    for (const c of cands) {
+      if (busy(Math.round(c.x), Math.round(c.y))) continue;
+      if (!D.has(c.k)) D.set(c.k, []);
+      D.get(c.k).push(c);
+    }
+    let best = null;
+    for (const dir of [-1, 1]) {                       // ball may fly left or right in the picture
+      for (const [k0, list] of D) {
+        for (const a of list) {
+          const nearBox = (dir < 0 ? (a.x > bx - bw && a.x < bx1) : (a.x > bx && a.x < bx1 + bw)) && a.y > by - 0.5 * bh && a.y < by1;
+          if (!nearBox) continue;
+          for (const dk of [1, 2, 3]) {
+            for (const b of (D.get(k0 + dk) || [])) {
+              const sx = dir * (b.x - a.x) / dk, sy = (b.y - a.y) / dk;
+              if (!(sx > 15 * s && sx < 120 * s && sy > -0.3 * sx && sy < 0.8 * sx)) continue;
+              const pts = [a, b]; let kk = k0 + dk + 1, miss = 0, err = 0;
+              while (kk < k && miss <= (pts.length >= 8 ? 0 : 2)) {
+                if (!seenK.has(kk)) { kk++; continue; }   // a frame the phone skipped is not a miss
+                const pa = pts[pts.length - 2], pb = pts[pts.length - 1];
+                const vx = (pb.x - pa.x) / (pb.k - pa.k), vy = (pb.y - pa.y) / (pb.k - pa.k);
+                const n = kk - pb.k, px = pb.x + vx * 1.08 * n, py = pb.y + vy * 1.08 * n;
+                const r = Math.max(12 * s, 0.35 * Math.abs(vx) * n);
+                const minStep = Math.max(10 * s, 0.6 * Math.abs(vx)) * n;
+                let q = null, qd = r * r;
+                for (const c of (D.get(kk) || [])) {
+                  const d2 = (c.x - px) ** 2 + (c.y - py) ** 2;
+                  if (d2 < qd && dir * (c.x - pb.x) > minStep) { q = c; qd = d2; }
+                }
+                if (q) { err += Math.sqrt(qd) / r; pts.push(q); miss = 0; } else miss++;
+                kk++;
+              }
+              const score = pts.length - 0.5 * err;
+              if (!best || score > best.score) best = { score, pts };
+            }
+          }
+        }
+      }
+    }
+    if (!best || best.pts.length < (opts.minFrames || 8)) return null;
+    return best.pts.map(p => ({ t: p.t, x: p.x / W, y: p.y / H }));
+  }
+  return { push, finish };
+}
+
+// ---------- Ball tracking: on/off, run the tracker on each clip, draw the flight ----------
+function fitPath(pts) {
+  // smooth curve y = a*x^2 + b*x + c through the ball positions (least squares)
+  let S = [0, 0, 0, 0, 0], T = [0, 0, 0];
+  for (const p of pts) { let xp = 1; for (let i = 0; i < 5; i++) { S[i] += xp; if (i < 3) T[i] += xp * p.y; xp *= p.x; } }
+  const M = [[S[4], S[3], S[2], T[2]], [S[3], S[2], S[1], T[1]], [S[2], S[1], S[0], T[0]]];
+  for (let i = 0; i < 3; i++) {
+    let m = i; for (let r = i + 1; r < 3; r++) if (Math.abs(M[r][i]) > Math.abs(M[m][i])) m = r;
+    [M[i], M[m]] = [M[m], M[i]];
+    if (Math.abs(M[i][i]) < 1e-12) return null;
+    for (let r = 0; r < 3; r++) if (r !== i) { const f = M[r][i] / M[i][i]; for (let c = i; c < 4; c++) M[r][c] -= f * M[i][c]; }
+  }
+  return [M[0][3] / M[0][0], M[1][3] / M[1][1], M[2][3] / M[2][2]];
+}
+// draw clip's ball path into a rectangle (ox, oy, w, h) that shows the whole video frame
+function drawTrack(g, ox, oy, w, h, clip, time) {
+  const tr = clip && clip.track; if (!tr || !tr.length) return;
+  const seen = tr.filter(p => p.t <= time + 0.01); if (!seen.length) return;
+  const f = clip.trackFit, x0 = tr[0].x, x1 = seen[seen.length - 1].x;
+  const pt = x => [ox + x * w, oy + (f ? (f[0] * x * x + f[1] * x + f[2]) : tr[0].y) * h];
+  const lw = Math.max(2, w / 300);
+  g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const [col, wid] of [['rgba(0,0,0,0.55)', lw * 2.2], ['#ffb020', lw]]) {
+    g.strokeStyle = col; g.lineWidth = wid; g.beginPath();
+    for (let i = 0; i <= 40; i++) { const [px, py] = pt(x0 + (x1 - x0) * i / 40); i ? g.lineTo(px, py) : g.moveTo(px, py); }
+    g.stroke();
+  }
+  const last = seen[seen.length - 1];
+  if (time - last.t < 0.2 && seen.length < tr.length) {     // ball still in the air: mark it
+    const [px, py] = pt(last.x);
+    g.fillStyle = '#ffffff'; g.strokeStyle = '#ffb020'; g.lineWidth = lw;
+    g.beginPath(); g.arc(px, py, lw * 2.2, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+  g.restore();
+}
+// keep the overlay on top of the review video
+const overlay = $('overlay'), octx = overlay.getContext('2d');
+function overlayLoop() {
+  const W = player.clientWidth, H = player.clientHeight;
+  if (overlay.width !== W || overlay.height !== H) { overlay.width = W; overlay.height = H; overlay.style.width = W + 'px'; overlay.style.height = H + 'px'; }
+  octx.clearRect(0, 0, W, H);
+  if (tracking && player.videoWidth && clips.length) {
+    const t = player.currentTime;
+    const c = clips.find(c => t >= c.start - 0.05 && t <= c.end + 0.05);
+    if (c) {
+      const sc = Math.min(W / player.videoWidth, H / player.videoHeight);
+      const vw = player.videoWidth * sc, vh = player.videoHeight * sc;
+      drawTrack(octx, (W - vw) / 2, (H - vh) / 2, vw, vh, c, t);
+    }
+  }
+  requestAnimationFrame(overlayLoop);
+}
+requestAnimationFrame(overlayLoop);
+
+// hand every frame between t0 and t1 to onFrame(time). Plays the clip at half speed and grabs each
+// frame as it is shown; falls back to stepping through with seeks on browsers that cannot do that.
+const TRACK_RATE = 0.5;
+async function eachFrame(v, t0, t1, onFrame, onProgress) {
+  await seek(v, t0);
+  if (!('requestVideoFrameCallback' in v)) {
+    for (let t = t0; t <= t1; t += 1 / 30) { await seek(v, t); onFrame(v.currentTime); onProgress((t - t0) / (t1 - t0)); }
+    return;
+  }
+  v.playbackRate = TRACK_RATE;
+  await new Promise(res => {
+    let done = false;
+    const finish = () => { if (done) return; done = true; try { v.pause(); } catch (e) {} res(); };
+    const cb = (now, meta) => {
+      if (done) return;
+      const t = meta.mediaTime;
+      if (t > t1 || v.ended) { finish(); return; }
+      onFrame(t); onProgress((t - t0) / (t1 - t0));
+      v.requestVideoFrameCallback(cb);
+    };
+    v.requestVideoFrameCallback(cb);
+    v.addEventListener('ended', finish, { once: true });
+    const p = v.play(); if (p && p.catch) p.catch(() => finish());
+    setTimeout(finish, ((t1 - t0) / TRACK_RATE + 10) * 1000);
+  });
+}
+async function trackClip(v, c, label) {
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const procW = Math.min(960, vw), sc = procW / vw, procH = Math.round(vh * sc);
+  const bx = box[0] * sc, by = box[1] * sc, bw = box[2] * sc, bh = box[3] * sc;
+  const y0 = Math.max(0, Math.round(by - 0.6 * bh)), Hb = procH - y0;   // the ball never flies far above Braden's head
+  const can = document.createElement('canvas'); can.width = procW; can.height = Hb;
+  const g = can.getContext('2d', { willReadFrequently: true });
+  const tracker = makeBallTracker(procW, Hb, [bx, by - y0, bw, bh]);
+  const t0 = Math.max(0, c.start - 0.3), t1 = Math.min(videoDur, c.end);
+  await eachFrame(v, t0, t1, t => {
+    g.drawImage(v, 0, y0 / sc, vw, Hb / sc, 0, 0, procW, Hb);
+    tracker.push(g.getImageData(0, 0, procW, Hb).data, t);
+  }, f => { $('trackMsg').textContent = `${label}... ${Math.round(100 * Math.min(1, f))}%  (keep this screen open)`; });
+  const pts = tracker.finish();
+  c.track = pts ? pts.map(p => ({ t: p.t, x: p.x, y: (y0 + p.y * Hb) / procH })) : null;
+  c.trackFit = c.track ? fitPath(c.track) : null;
+  c.trackDone = true;
+}
+async function trackAll() {
+  if (trackingBusy) return;
+  if (!clips.length) { $('trackMsg').textContent = 'Find pitches first, then the ball will be tracked on each one.'; return; }
+  const todo = clips.filter(c => !c.trackDone);
+  if (!todo.length) { trackSummary(); return; }
+  if (!box) { $('trackMsg').textContent = 'Draw a box around Braden first.'; return; }
+  trackingBusy = true; $('trackBtn').disabled = true;
+  let v = null, wake = null;
+  try {
+    try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    v = await makeVideo(url);
+    v.style.cssText = 'position:fixed;right:0;bottom:0;width:160px;height:90px;opacity:0.01;pointer-events:none';
+    for (let i = 0; i < todo.length; i++) {
+      await trackClip(v, todo[i], `Finding the ball: pitch ${clips.indexOf(todo[i]) + 1} of ${clips.length}`);
+      showClips(false);
+    }
+    trackSummary();
+  } catch (e) {
+    $('trackMsg').textContent = 'Problem tracking the ball: ' + e.message;
+  } finally {
+    try { if (v) v.remove(); } catch (e) {}
+    try { if (wake) wake.release(); } catch (e) {}
+    trackingBusy = false; $('trackBtn').disabled = false;
+  }
+}
+function trackSummary() {
+  const done = clips.filter(c => c.trackDone), found = done.filter(c => c.track);
+  $('trackMsg').textContent = `Ball found on ${found.length} of ${clips.length} pitches. The flight line draws as each clip plays, and goes into the highlight reel.`;
+}
+window.toggleTracking = () => {
+  tracking = !tracking;
+  $('trackBtn').textContent = 'Ball tracking: ' + (tracking ? 'on' : 'off');
+  $('trackBtn').classList.toggle('on', tracking);
+  showClips(false);
+  if (tracking) trackAll();
+  else $('trackMsg').textContent = 'Ball tracking is off. Clips and the highlight reel show no flight line.';
+};
+
+// ---------- Highlight reel: join all clips into one video ----------
+function pickMime() {
   if (!window.MediaRecorder) return null;
-  const tries = withAudio
-    ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
-    : ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const tries = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   for (const m of tries) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch (e) {} }
   return '';
 }
@@ -696,17 +978,10 @@ window.makeReel = async () => {
   const msg = $('reelMsg'), btn = $('makeReelBtn');
   if (!clips.length) { msg.textContent = 'Find some pitches first.'; return; }
   if (reeling) return;
-  const musicFile = $('music').files[0] || null;
-  // the audio engine has to be started right away, while your tap still counts
-  let actx = null;
-  if (musicFile) {
-    try { actx = new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); }
-    catch (e) { actx = null; }
-  }
   reeling = true; btn.disabled = true; $('reelOut').classList.add('hidden');
-  let wake = null, v = null, stream = null, song = null;
+  let wake = null, v = null, stream = null;
   try {
-    const mime = pickMime(!!musicFile);
+    const mime = pickMime();
     if (mime === null) throw new Error('This browser cannot record video.');
     const probe = document.createElement('canvas');
     if (!probe.captureStream) throw new Error('This browser cannot record from the screen canvas. Try the laptop instead.');
@@ -719,24 +994,7 @@ window.makeReel = async () => {
     const c2 = canvas.getContext('2d');
     await seek(v, clips[0].start);
     c2.drawImage(v, 0, 0, cw, ch);
-    const vidStream = canvas.captureStream(30);
-    stream = vidStream;
-
-    // music: decode the song and feed it into the recording (not out of the speaker)
-    let gain = null;
-    if (musicFile) {
-      if (!actx) throw new Error('This browser cannot add music. Tap No music and try again.');
-      msg.textContent = 'Loading the song...';
-      const data = await musicFile.arrayBuffer();
-      const buf = await new Promise((res, rej) => actx.decodeAudioData(data, res, () => rej(new Error('That song file could not be read. Try an .mp3 or .m4a file.'))));
-      await actx.resume();
-      const dest = actx.createMediaStreamDestination();
-      gain = actx.createGain();
-      gain.gain.value = parseInt($('musicVol').value) / 100;
-      song = actx.createBufferSource(); song.buffer = buf; song.loop = true;
-      song.connect(gain); gain.connect(dest);
-      stream = new MediaStream([...vidStream.getVideoTracks(), ...dest.stream.getAudioTracks()]);
-    }
+    stream = canvas.captureStream(30);
 
     const opts = mime ? { mimeType: mime, videoBitsPerSecond: 6000000 } : { videoBitsPerSecond: 6000000 };
     const rec = new MediaRecorder(stream, opts);
@@ -745,15 +1003,16 @@ window.makeReel = async () => {
     const stopped = new Promise(res => { rec.onstop = res; });
     try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {}
     let drawing = true;
-    const draw = () => { if (!drawing) return; c2.drawImage(v, 0, 0, cw, ch); requestAnimationFrame(draw); };
+    const draw = () => { if (!drawing) return; c2.drawImage(v, 0, 0, cw, ch); if (tracking && reelClip) drawTrack(c2, 0, 0, cw, ch, reelClip, v.currentTime); requestAnimationFrame(draw); };
     rec.start(250);
-    if (song) song.start();
     draw();
     for (let i = 0; i < clips.length; i++) {
       const c = clips[i];
+      reelClip = null;
       msg.textContent = `Recording clip ${i + 1} of ${clips.length}... keep this screen open`;
       await seek(v, c.start);
       v.playbackRate = 1;
+      reelClip = c;
       try { await v.play(); } catch (e) {}
       await new Promise(res => {
         const limit = setTimeout(res, (c.end - c.start + 6) * 1000);
@@ -764,13 +1023,6 @@ window.makeReel = async () => {
         tick();
       });
       v.pause();
-    }
-    // fade the music out over the last second, on the final frame
-    if (gain) {
-      const now = actx.currentTime;
-      gain.gain.setValueAtTime(gain.gain.value, now);
-      gain.gain.linearRampToValueAtTime(0, now + 1.0);
-      await new Promise(r => setTimeout(r, 1000));
     }
     drawing = false;
     rec.stop();
@@ -790,12 +1042,10 @@ window.makeReel = async () => {
   } catch (e) {
     msg.textContent = 'Problem making the reel: ' + e.message;
   } finally {
-    try { if (song) song.stop(); } catch (e) {}
-    try { if (actx) actx.close(); } catch (e) {}
     try { if (stream) stream.getTracks().forEach(t => t.stop()); } catch (e) {}
     try { if (v) v.remove(); } catch (e) {}
     try { if (wake) wake.release(); } catch (e) {}
-    reeling = false; btn.disabled = false;
+    reeling = false; btn.disabled = false; reelClip = null;
   }
 };
 window.saveReel = async () => {
