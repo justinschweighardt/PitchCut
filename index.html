@@ -8,10 +8,11 @@
   :root { --bg:#0b1220; --panel:#121c2f; --panel2:#1a2742; --text:#eaf1fb; --muted:#8fa3bf; --accent:#ffb020; --accent2:#3ba3ff; --red:#e5484d; }
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,Segoe UI,Roboto,sans-serif; background:radial-gradient(1200px 600px at 50% -200px,#16284a,var(--bg)); color:var(--text); min-height:100vh; }
-  header { display:flex; align-items:center; gap:12px; padding:14px 18px; background:rgba(18,28,47,.85); backdrop-filter:blur(8px); position:sticky; top:0; z-index:5; border-bottom:1px solid #22314f; }
-  header .name { font-size:24px; font-weight:800; letter-spacing:.3px; }
+  header { position:relative; background:#010e1c; border-bottom:1px solid #22314f; }
+  header img { display:block; width:100%; max-width:960px; height:auto; margin:0 auto; }
+  header .name { display:none; font-size:28px; font-weight:800; letter-spacing:.3px; padding:18px; text-align:center; }
   header .name b { color:var(--accent); }
-  header .ver { font-size:12px; color:var(--muted); border:1px solid #2a3b5e; border-radius:999px; padding:2px 8px; margin-left:auto; }
+  header .ver { display:table; margin:2px 8px 6px auto; font-size:11px; color:var(--muted); background:rgba(1,14,28,.7); border:1px solid #2a3b5e; border-radius:999px; padding:2px 8px; }
   .wrap { max-width:960px; margin:0 auto; padding:16px; }
   .card { background:var(--panel); border:1px solid #22314f; border-radius:16px; padding:16px; margin-bottom:16px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
   h3 { margin:0 0 10px; font-size:17px; letter-spacing:.2px; }
@@ -67,20 +68,9 @@
 </head>
 <body>
 <header>
-  <svg width="44" height="44" viewBox="0 0 64 64" aria-label="PitchCut logo">
-    <defs><clipPath id="c"><circle cx="32" cy="32" r="26"/></clipPath></defs>
-    <circle cx="32" cy="32" r="26" fill="#f4f1ea"/>
-    <g clip-path="url(#c)" fill="none" stroke="#e5484d" stroke-width="2.2" stroke-linecap="round">
-      <path d="M14 8 C24 20, 24 44, 14 56"/><path d="M50 8 C40 20, 40 44, 50 56"/>
-      <path d="M17 15 l6 2 M19 23 l6 1.5 M20 32 l6 0 M19 41 l6 -1.5 M17 49 l6 -2"/>
-      <path d="M47 15 l-6 2 M45 23 l-6 1.5 M44 32 l-6 0 M45 41 l-6 -1.5 M47 49 l-6 -2"/>
-    </g>
-    <circle cx="32" cy="32" r="26" fill="none" stroke="#0b1220" stroke-width="2"/>
-    <path d="M6 50 L58 14" stroke="#ffb020" stroke-width="5" stroke-linecap="round"/>
-    <path d="M6 50 L58 14" stroke="#0b1220" stroke-width="1.2" stroke-linecap="round" opacity=".5"/>
-  </svg>
-  <div class="name">Pitch<b>Cut</b></div>
-  <div class="ver">v4.6.5</div>
+  <img src="logo.jpg" alt="PitchCut: only the pitches" onerror="this.style.display='none'; document.getElementById('logoText').style.display='block';">
+  <div class="name" id="logoText">Pitch<b>Cut</b></div>
+  <div class="ver">v4.6.6</div>
 </header>
 
 <div class="wrap">
